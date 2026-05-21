@@ -1,7 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 
-const Simulator = @import("zigmulator").Simulator;
+const Simulator = @import("zigmulator");
 
 fn programA(init: std.process.Init) anyerror!void {
     var stdout = Io.File.stdout().writerStreaming(init.io, &.{});
