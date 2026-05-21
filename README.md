@@ -51,6 +51,14 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
+To see this example in action:
+
+```sh
+zig build run
+```
+
+which will build examples/example.zig
+
 ## How it works
 
 Zigmulator implements an in-memory kernel, disk, network and plugs it into your application via the new IO interface (since Zig 0.16). Multiple programs can run in the same simulation, in which case network traffic is routed between their mocks. This is a bruteforce approach but the only one that allows a complete control of the environment the applications are running in.

@@ -20,5 +20,11 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("zigmulator", zigmulator);
 
-    b.installArtifact(exe);
+    const run_cmd = b.addRunArtifact(exe);
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run the example");
+    run_step.dependOn(&run_cmd.step);
 }
