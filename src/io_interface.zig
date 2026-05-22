@@ -849,9 +849,12 @@ fn progressParentFile(userdata: ?*anyopaque) std.Progress.ParentFileError!File {
 }
 
 fn now(userdata: ?*anyopaque, clock: Clock) Timestamp {
-    _ = userdata;
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+
+    // TODO: Return an appropriate time for each clock
     _ = clock;
-    @panic("Not implemented yet");
+
+    return .{ .nanoseconds = node.scheduler.current_time * 1000 };
 }
 
 fn clockResolution(userdata: ?*anyopaque, clock: Clock) Clock.ResolutionError!Duration {
