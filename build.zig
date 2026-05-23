@@ -79,4 +79,16 @@ pub fn build(b: *std.Build) void {
     delete_file_exe.root_module.addImport("zigmulator", zigmulator);
     const install_delete_file_exe = b.addInstallArtifact(delete_file_exe, .{});
     examples_step.dependOn(&install_delete_file_exe.step);
+
+    const delete_dir_exe = b.addExecutable(.{
+        .name = "delete_dir",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/delete_dir.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    delete_dir_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_delete_dir_exe = b.addInstallArtifact(delete_dir_exe, .{});
+    examples_step.dependOn(&install_delete_dir_exe.step);
 }
