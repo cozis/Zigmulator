@@ -423,7 +423,9 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8) HandleError!usize {
     return self.network_host.read(&desc.conn, target);
 }
 
-pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) HandleError!usize {
+pub const WriteSocketError = HandleError || Network.SendError;
+
+pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketError!usize {
     self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .conn);
     return self.network_host.send(&desc.conn, source);

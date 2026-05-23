@@ -27,12 +27,20 @@ pub const ConnectError = error {
     PeerNotListeningOnAddress,
 } || Allocator.Error;
 
-pub const SendError = Allocator.Error;
+pub const SendError = error {
+    NotConnected,
+} || Allocator.Error;
+
 pub const ReadError = error {};
 
 pub const ListenSocket = struct {
 
     next: ?*ListenSocket,
+
+    // A reference to the host is necessary as sockets from
+    // other hosts need to be able to infer the host by just
+    // the pointer to a socket.
+    host: *Host,
 
     address: Address,
     accept_queue: std.ArrayList(*ConnSocket),
@@ -42,11 +50,13 @@ pub const ConnSocket = struct {
 
     next: ?*ConnSocket,
 
+    // See comment on ListenSocket
+    host: *Host,
+
     peer_listen: ?*ListenSocket,
     peer_conn  : ?*ConnSocket,
 
     input_buffer: std.ArrayList(u8),
-    output_buffer: std.ArrayList(u8),
 };
 
 pub const Host = struct {
@@ -70,21 +80,49 @@ pub const Host = struct {
     }
 
     pub fn deinit(self: *Host) void {
-        _ = self;
+
+        while (self.conn_list) |s| {
+            self.closeConnSocket(s);
+        }
+
+        while (self.listen_list) |s| {
+            self.closeListenSocket(s);
+        }
     }
 
     fn linkConnSocket(self: *Host, socket: *ConnSocket) void {
+        socket.host = self;
         socket.next = self.conn_list;
         self.conn_list = socket;
     }
 
     fn unlinkConnSocket(self: *Host, socket: *ConnSocket) void {
-        var cursor = self.conn_list.*; // Note that the list can't be empty or we wouldn't be unlinking
-        if (cursor == socket) {
-            self.conn_list = null;
-        } else {
-            while (cursor.next != socket)
-                cursor = cursor.next.*;
+        var cursor = &self.conn_list;
+        while (cursor.*) |item| {
+            if (item == socket) {
+                cursor.* = item.next;
+                socket.next = null;
+                return;
+            }
+            cursor = &item.next;
+        }
+    }
+
+    fn linkListenSocket(self: *Host, socket: *ListenSocket) void {
+        socket.host = self;
+        socket.next = self.listen_list;
+        self.listen_list = socket;
+    }
+
+    fn unlinkListenSocket(self: *Host, socket: *ListenSocket) void {
+        var cursor = &self.listen_list;
+        while (cursor.*) |item| {
+            if (item == socket) {
+                cursor.* = item.next;
+                socket.next = null;
+                return;
+            }
+            cursor = &item.next;
         }
     }
 
@@ -117,9 +155,7 @@ pub const Host = struct {
         socket.address = address;
         socket.accept_queue = .empty;
 
-        // Add listen socket to the list
-        socket.next = self.listen_list;
-        self.listen_list = socket;
+        self.linkListenSocket(socket);
     }
 
     pub fn accept(self: *Host, socket: *ListenSocket, new_socket: *ConnSocket) AcceptError!void {
@@ -141,7 +177,6 @@ pub const Host = struct {
         // Initialize other fields
         new_socket.peer_listen = null;
         new_socket.input_buffer = .empty;
-        new_socket.output_buffer = .empty;
     }
 
     fn findListenSocket(self: *Host, address: Address) ?*ListenSocket {
@@ -166,10 +201,11 @@ pub const Host = struct {
         new_socket.peer_listen = listen_socket;
         new_socket.peer_conn = null;
         new_socket.input_buffer = .empty;
-        new_socket.output_buffer = .empty;
 
         // Add socket to the peer's accept queue
-        try listen_socket.accept_queue.append(self.gpa, new_socket);
+        //
+        // Note that we're using the peer's allocator and not the local one. Very important!
+        try listen_socket.accept_queue.append(host.gpa, new_socket);
     }
 
     pub fn closeConnSocket(self: *Host, socket: *ConnSocket) void {
@@ -189,7 +225,6 @@ pub const Host = struct {
 
         self.unlinkConnSocket(socket);
         socket.input_buffer.deinit(self.gpa);
-        socket.output_buffer.deinit(self.gpa);
     }
 
     pub fn closeListenSocket(self: *Host, socket: *ListenSocket) void {
@@ -202,20 +237,17 @@ pub const Host = struct {
         socket.accept_queue.deinit(self.gpa);
     }
 
-    pub fn send(self: *Host, socket: *ConnSocket, source: []const u8) usize {
-        var n: usize = 0;
-        for (source) |c| {
-            socket.output_buffer.append(self.gpa, c) catch break;
-            n += 1;
-        }
-        return n;
+    pub fn send(_: *Host, socket: *ConnSocket, source: []const u8) usize {
+        const peer_conn = socket.peer_conn orelse return SendError.NotConnected;
+        try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, source);
+        return source.len;
     }
 
     pub fn read(_: *Host, socket: *ConnSocket, target: []u8) usize {
         const num = @min(target.len, socket.input_buffer.items.len);
         @memcpy(target[0..num], socket.input_buffer.items[0..num]);
         for (0..num) |_| {
-            socket.input_buffer.orderedRemove(0);
+            _ = socket.input_buffer.orderedRemove(0);
         }
         return num;
     }
