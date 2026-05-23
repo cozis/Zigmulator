@@ -233,11 +233,22 @@ pub fn createFile(self: *Node, parent: ?Handle, path: []const u8) CreateFileErro
     );
 }
 
-pub const DeleteFileError = HandleError || FileSystem.DeleteError;
+pub const DeleteFileError = HandleError || FileSystem.DeleteFileError;
 
 pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileError!void {
     self.scheduler.sleep(10);
-    return self.file_system.deleteAny(
+    return self.file_system.deleteFile(
+        path,
+        try self.handleToOpenDirOrNULL(parent),
+        self.gpa
+    );
+}
+
+pub const DeleteDirError = HandleError || FileSystem.DeleteDirError;
+
+pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!void {
+    self.scheduler.sleep(10);
+    return self.file_system.deleteDir(
         path,
         try self.handleToOpenDirOrNULL(parent),
         self.gpa
