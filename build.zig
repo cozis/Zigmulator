@@ -43,4 +43,16 @@ pub fn build(b: *std.Build) void {
     open_file_exe.root_module.addImport("zigmulator", zigmulator);
     const install_open_file_exe = b.addInstallArtifact(open_file_exe, .{});
     examples_step.dependOn(&install_open_file_exe.step);
+
+    const read_file_exe = b.addExecutable(.{
+        .name = "read_file",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/read_file.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    read_file_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_read_file_exe = b.addInstallArtifact(read_file_exe, .{});
+    examples_step.dependOn(&install_read_file_exe.step);
 }
