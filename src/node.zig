@@ -365,6 +365,20 @@ pub fn writeFile(
     }
 }
 
+pub const SeekFileError = HandleError || FileSystem.SeekError;
+
+pub fn seekFileTo(self: *Node, handle: Handle, offset: usize) SeekFileError!void {
+    self.scheduler.sleep(2);
+    const desc = try self.handleToDescOfType(handle, .file);
+    self.file_system.seekFileTo(&desc.file, offset);
+}
+
+pub fn seekFileBy(self: *Node, handle: Handle, offset: i64) SeekFileError!void {
+    self.scheduler.sleep(2);
+    const desc = try self.handleToDescOfType(handle, .file);
+    try self.file_system.seekFileBy(&desc.file, offset);
+}
+
 pub const Address = Network.Address;
 pub const ListenError = error {
     DescriptorLimit,
