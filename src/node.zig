@@ -381,3 +381,7 @@ pub fn closeSocket(self: *Node, handle: Handle) HandleError!void {
     }
     desc.kind = .unused;
 }
+
+pub fn dumpFiles(self: *Node) void {
+    self.file_system.dump();
+}

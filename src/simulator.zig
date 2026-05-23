@@ -77,6 +77,12 @@ pub fn scheduleOne(self: *Simulator) bool {
     return self.scheduler.scheduleOne();
 }
 
+pub fn dumpFiles(self: *Simulator) void {
+    for (self.nodes.items) |node| {
+        node.dumpFiles();
+    }
+}
+
 // Reads the first word of a command
 //     "program arg1 arg2 arg3" -> "program"
 fn extractProgramNameFromCommand(command: []const u8) ?[]const u8 {

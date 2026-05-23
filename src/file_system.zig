@@ -414,3 +414,23 @@ pub fn fileSize(self: *FileSystem, open_file: *OpenFile) usize {
     _ = self;
     return open_file.entity.bytes.items.len;
 }
+
+fn dumpEntity(entity: *Entity, depth: u32) void {
+    if (entity.is_dir) {
+        for (entity.children.items) |item| {
+            for (0..depth) |_|
+                std.debug.print("  ", .{});
+            std.debug.print("{s}\n", .{ item.getName() });
+            dumpEntity(item.addr, depth+1);
+        }
+    } else {
+        for (0..depth) |_|
+            std.debug.print("  ", .{});
+        std.debug.print("[{s}]", .{ entity.bytes.items });
+    }
+}
+
+pub fn dump(self: *FileSystem) void {
+    dumpEntity(self.root, 0);
+    std.debug.print("\n", .{});
+}
