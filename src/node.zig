@@ -184,6 +184,29 @@ pub fn closeDir(self: *Node, handle: Handle) HandleError!void {
     desc.kind = .unused;
 }
 
+pub const CreateDirError = HandleError || FileSystem.CreateError;
+
+pub fn createDir(self: *Node, parent: ?Handle, path: []const u8) CreateDirError!void {
+    self.scheduler.sleep(10);
+    return self.file_system.createDir(
+        path,
+        try self.handleToOpenDirOrNULL(parent),
+        self.gpa
+    );
+}
+
+pub const OpenDirError = error {
+    DescriptorLimit,
+} || HandleError || FileSystem.OpenError;
+
+pub fn openDir(self: *Node, parent: ?Handle, path: []const u8) OpenDirError!Handle {
+    self.scheduler.sleep(10);
+    const desc = self.unusedDesc() orelse return OpenDirError.DescriptorLimit;
+    try self.file_system.openDir(path, try self.handleToOpenDirOrNULL(parent), &desc.dir);
+    desc.kind = .dir;
+    return self.descToHandle(desc);
+}
+
 pub fn readDir(self: *Node, handle: Handle) HandleError!FileSystem.ReadDir {
     self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .dir);
