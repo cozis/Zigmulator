@@ -444,6 +444,29 @@ pub fn fileSize(self: *FileSystem, open_file: *OpenFile) usize {
     return open_file.entity.bytes.items.len;
 }
 
+pub const SeekError = error {
+    NegativeOffset,
+    Overflow,
+};
+
+pub fn seekFileTo(self: *FileSystem, open_file: *OpenFile, offset: usize) void {
+    _ = self;
+    open_file.cursor = offset;
+}
+
+pub fn seekFileBy(self: *FileSystem, open_file: *OpenFile, offset: i64) SeekError!void {
+    _ = self;
+    if (offset < 0) {
+        const delta: usize = @intCast(-offset);
+        if (delta > open_file.cursor)
+            return SeekError.NegativeOffset;
+        open_file.cursor -= delta;
+    } else {
+        const delta: usize = @intCast(offset);
+        open_file.cursor = std.math.add(usize, open_file.cursor, delta) catch return SeekError.Overflow;
+    }
+}
+
 fn dumpEntity(entity: *Entity, depth: u32) void {
     if (entity.is_dir) {
         for (entity.children.items) |item| {
