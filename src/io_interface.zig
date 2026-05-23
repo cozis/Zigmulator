@@ -348,11 +348,24 @@ fn batchCancel(userdata: ?*anyopaque, batch: *Batch) void {
 }
 
 fn dirCreateDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, permissions: Dir.Permissions) Dir.CreateDirError!void {
-    _ = userdata;
-    _ = dir;
-    _ = sub_path;
-    _ = permissions;
-    @panic("Not implemented yet");
+    _ = permissions; // TODO: Use permissions
+
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const parent = if (dir.handle == Dir.cwd().handle) null else dir.handle;
+
+    node.createDir(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.CreateDirError.InvalidHandle          => unreachable,
+            Node.CreateDirError.ExistsAlready          => Dir.CreateDirError.PathAlreadyExists,
+            Node.CreateDirError.EmptyPath              => Dir.CreateDirError.BadPathName,
+            Node.CreateDirError.NoRootParent           => Dir.CreateDirError.FileNotFound,
+            Node.CreateDirError.TooManyComponents      => Dir.CreateDirError.NameTooLong,
+            Node.CreateDirError.ResolutionLimit        => Dir.CreateDirError.NameTooLong,
+            Node.CreateDirError.ComponentNotDirectory  => Dir.CreateDirError.NotDir,
+            Node.CreateDirError.ComponentNotFound      => Dir.CreateDirError.FileNotFound,
+            Node.CreateDirError.OutOfMemory            => Dir.CreateDirError.SystemResources,
+        };
+    };
 }
 
 fn dirCreateDirPath(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, permissions: Dir.Permissions) Dir.CreateDirPathError!Dir.CreatePathStatus {
@@ -373,11 +386,27 @@ fn dirCreateDirPathOpen(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, p
 }
 
 fn dirOpenDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, options: Dir.OpenOptions) Dir.OpenError!Dir {
-    _ = userdata;
-    _ = dir;
-    _ = sub_path;
-    _ = options;
-    @panic("Not implemented yet");
+    _ = options; // TODO: Use options
+
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const parent = if (dir.handle == Dir.cwd().handle) null else dir.handle;
+
+    const handle = node.openDir(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.OpenDirError.InvalidHandle            => unreachable,
+            Node.OpenDirError.DescriptorLimit          => Dir.OpenError.ProcessFdQuotaExceeded,
+            Node.OpenDirError.IsDirectory              => unreachable,
+            Node.OpenDirError.NotDirectory             => Dir.OpenError.NotDir,
+            Node.OpenDirError.EmptyPath                => Dir.OpenError.BadPathName,
+            Node.OpenDirError.NoRootParent             => Dir.OpenError.FileNotFound,
+            Node.OpenDirError.TooManyComponents        => Dir.OpenError.NameTooLong,
+            Node.OpenDirError.ResolutionLimit          => Dir.OpenError.NameTooLong,
+            Node.OpenDirError.ComponentNotDirectory    => Dir.OpenError.NotDir,
+            Node.OpenDirError.ComponentNotFound        => Dir.OpenError.FileNotFound,
+        };
+    };
+
+    return .{ .handle = handle };
 }
 
 fn dirStat(userdata: ?*anyopaque, dir: Dir) Dir.StatError!Dir.Stat {
@@ -479,9 +508,12 @@ fn dirOpenFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: Dir
 }
 
 fn dirClose(userdata: ?*anyopaque, dirs: []const Dir) void {
-    _ = userdata;
-    _ = dirs;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    for (dirs) |dir| {
+        if (dir.handle == Dir.cwd().handle)
+            continue;
+        node.closeDir(dir.handle) catch {};
+    }
 }
 
 fn dirRead(userdata: ?*anyopaque, dr: *Dir.Reader, buffer: []Dir.Entry) Dir.Reader.Error!usize {
