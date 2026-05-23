@@ -539,17 +539,42 @@ fn dirRealPathFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, out_bu
 }
 
 fn dirDeleteFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8) Dir.DeleteFileError!void {
-    _ = userdata;
-    _ = dir;
-    _ = sub_path;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const parent = if (dir.handle == Dir.cwd().handle) null else dir.handle;
+
+    node.deleteFile(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.DeleteFileError.InvalidHandle => unreachable,
+            Node.DeleteFileError.EmptyPath => Dir.DeleteFileError.BadPathName,
+            Node.DeleteFileError.NoRootParent => Dir.DeleteFileError.FileNotFound,
+            Node.DeleteFileError.TooManyComponents => Dir.DeleteFileError.NameTooLong,
+            Node.DeleteFileError.ResolutionLimit => Dir.DeleteFileError.NameTooLong,
+            Node.DeleteFileError.ComponentNotDirectory => Dir.DeleteFileError.NotDir,
+            Node.DeleteFileError.ComponentNotFound => Dir.DeleteFileError.FileNotFound,
+            Node.DeleteFileError.NotFound => Dir.DeleteFileError.FileNotFound,
+            Node.DeleteFileError.IsDirectory => Dir.DeleteFileError.IsDir,
+        };
+    };
 }
 
 fn dirDeleteDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8) Dir.DeleteDirError!void {
-    _ = userdata;
-    _ = dir;
-    _ = sub_path;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const parent = if (dir.handle == Dir.cwd().handle) null else dir.handle;
+
+    node.deleteDir(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.DeleteDirError.InvalidHandle          => unreachable,
+            Node.DeleteDirError.EmptyPath              => Dir.DeleteDirError.BadPathName,
+            Node.DeleteDirError.NoRootParent           => Dir.DeleteDirError.FileNotFound,
+            Node.DeleteDirError.TooManyComponents      => Dir.DeleteDirError.NameTooLong,
+            Node.DeleteDirError.ResolutionLimit        => Dir.DeleteDirError.NameTooLong,
+            Node.DeleteDirError.ComponentNotDirectory  => Dir.DeleteDirError.NotDir,
+            Node.DeleteDirError.ComponentNotFound      => Dir.DeleteDirError.FileNotFound,
+            Node.DeleteDirError.NotFound               => Dir.DeleteDirError.FileNotFound,
+            Node.DeleteDirError.NotDirectory           => Dir.DeleteDirError.NotDir,
+            Node.DeleteDirError.DirNotEmpty            => Dir.DeleteDirError.DirNotEmpty,
+        };
+    };
 }
 
 fn dirRename(userdata: ?*anyopaque, old_dir: Dir, old_sub_path: []const u8, new_dir: Dir, new_sub_path: []const u8) Dir.RenameError!void {
