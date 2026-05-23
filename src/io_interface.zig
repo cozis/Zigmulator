@@ -722,13 +722,45 @@ fn fileWritePositional(
     splat   : usize,
     offset  : u64
 ) File.WritePositionalError!usize {
-    _ = userdata;
-    _ = file;
-    _ = header;
-    _ = data;
-    _ = splat;
-    _ = offset;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    var cursor = std.math.cast(usize, offset) orelse return File.WritePositionalError.FileTooBig;
+    var copied: usize = 0;
+
+    if (header.len != 0) {
+        const written = node.writeFile(file.handle, cursor, header, &.{}) catch |err| switch (err) {
+            error.InvalidHandle => return File.WritePositionalError.NotOpenForWriting,
+            error.OutOfMemory => return File.WritePositionalError.SystemResources,
+        };
+        cursor = std.math.add(usize, cursor, written) catch return File.WritePositionalError.FileTooBig;
+        copied += written;
+    }
+
+    if (data.len != 0) {
+        for (data[0 .. data.len - 1]) |bytes| {
+            if (bytes.len == 0)
+                continue;
+            const written = node.writeFile(file.handle, cursor, bytes, &.{}) catch |err| switch (err) {
+                error.InvalidHandle => return File.WritePositionalError.NotOpenForWriting,
+                error.OutOfMemory => return File.WritePositionalError.SystemResources,
+            };
+            cursor = std.math.add(usize, cursor, written) catch return File.WritePositionalError.FileTooBig;
+            copied += written;
+        }
+
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            if (pattern.len == 0)
+                break;
+            const written = node.writeFile(file.handle, cursor, pattern, &.{}) catch |err| switch (err) {
+                error.InvalidHandle => return File.WritePositionalError.NotOpenForWriting,
+                error.OutOfMemory => return File.WritePositionalError.SystemResources,
+            };
+            cursor = std.math.add(usize, cursor, written) catch return File.WritePositionalError.FileTooBig;
+            copied += written;
+        }
+    }
+
+    return copied;
 }
 
 fn fileWriteFileStreaming(userdata: ?*anyopaque, file: File, header: []const u8, file_reader: *Io.File.Reader, limit: Io.Limit) File.Writer.WriteFileError!usize {
@@ -768,17 +800,20 @@ fn fileReadPositional(userdata: ?*anyopaque, file: File, data: []const []u8, off
 }
 
 fn fileSeekBy(userdata: ?*anyopaque, file: File, offset: i64) File.SeekError!void {
-    _ = userdata;
-    _ = file;
-    _ = offset;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.seekFileBy(file.handle, offset) catch |err| switch (err) {
+        error.InvalidHandle => return File.SeekError.AccessDenied,
+        error.NegativeOffset, error.Overflow => return File.SeekError.Unseekable,
+    };
 }
 
 fn fileSeekTo(userdata: ?*anyopaque, file: File, offset: u64) File.SeekError!void {
-    _ = userdata;
-    _ = file;
-    _ = offset;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const offset_usize = std.math.cast(usize, offset) orelse return File.SeekError.Unseekable;
+    node.seekFileTo(file.handle, offset_usize) catch |err| switch (err) {
+        error.InvalidHandle => return File.SeekError.AccessDenied,
+        error.NegativeOffset, error.Overflow => return File.SeekError.Unseekable,
+    };
 }
 
 fn fileSync(userdata: ?*anyopaque, file: File) File.SyncError!void {
