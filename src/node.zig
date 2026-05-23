@@ -207,7 +207,15 @@ pub fn openDir(self: *Node, parent: ?Handle, path: []const u8) OpenDirError!Hand
     return self.descToHandle(desc);
 }
 
-pub fn readDir(self: *Node, handle: Handle) HandleError!FileSystem.ReadDir {
+pub fn resetDir(self: *Node, handle: Handle) HandleError!void {
+    self.scheduler.sleep(2);
+    const desc = try self.handleToDescOfType(handle, .dir);
+    self.file_system.resetDir(&desc.dir);
+}
+
+pub const ReadDirError = HandleError || FileSystem.ReadDirError;
+
+pub fn readDir(self: *Node, handle: Handle) ReadDirError!FileSystem.ReadDir {
     self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .dir);
     return self.file_system.readDir(&desc.dir);
