@@ -452,11 +452,30 @@ fn dirCreateFileAtomic(userdata: ?*anyopaque, dir: Dir, dest_path: []const u8, o
 }
 
 fn dirOpenFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: Dir.OpenFileOptions) File.OpenError!File {
-    _ = userdata;
-    _ = dir;
-    _ = sub_path;
-    _ = flags;
-    @panic("Not implemented yet");
+    _ = flags; // TODO: Use flags
+
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const parent = if (dir.handle == Dir.cwd().handle) null else dir.handle;
+
+    const handle = node.openFile(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.OpenFileError.InvalidHandle            => unreachable,
+            Node.OpenFileError.DescriptorLimit          => File.OpenError.ProcessFdQuotaExceeded,
+            Node.OpenFileError.IsDirectory              => File.OpenError.IsDir,
+            Node.OpenFileError.NotDirectory             => File.OpenError.NotDir,
+            Node.OpenFileError.EmptyPath                => File.OpenError.BadPathName,
+            Node.OpenFileError.NoRootParent             => File.OpenError.FileNotFound,
+            Node.OpenFileError.TooManyComponents        => File.OpenError.NameTooLong,
+            Node.OpenFileError.ResolutionLimit          => File.OpenError.NameTooLong,
+            Node.OpenFileError.ComponentNotDirectory    => File.OpenError.NotDir,
+            Node.OpenFileError.ComponentNotFound        => File.OpenError.FileNotFound,
+        };
+    };
+
+    return .{
+        .handle = handle,
+        .flags = .{ .nonblocking = false },
+    };
 }
 
 fn dirClose(userdata: ?*anyopaque, dirs: []const Dir) void {
@@ -595,15 +614,17 @@ fn fileStat(userdata: ?*anyopaque, file: File) File.StatError!File.Stat {
 }
 
 fn fileLength(userdata: ?*anyopaque, file: File) File.LengthError!u64 {
-    _ = userdata;
-    _ = file;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    return node.fileSize(file.handle) catch |e| switch (e) {
+        error.InvalidHandle => File.LengthError.Streaming,
+    };
 }
 
 fn fileClose(userdata: ?*anyopaque, files: []const File) void {
-    _ = userdata;
-    _ = files;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    for (files) |file| {
+        node.closeFile(file.handle) catch {};
+    }
 }
 
 fn fileWritePositional(
@@ -643,11 +664,20 @@ fn fileWriteFilePositional(userdata: ?*anyopaque, file: File, header: []const u8
 }
 
 fn fileReadPositional(userdata: ?*anyopaque, file: File, data: []const []u8, offset: u64) File.ReadPositionalError!usize {
-    _ = userdata;
-    _ = file;
-    _ = data;
-    _ = offset;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+
+    var copied: usize = 0;
+    for (data) |buffer| {
+        const bytes_read = node.readFile(file.handle, @intCast(offset + copied), buffer) catch |e| {
+            return switch (e) {
+                error.InvalidHandle => File.ReadPositionalError.NotOpenForReading,
+            };
+        };
+        copied += bytes_read;
+        if (bytes_read < buffer.len)
+            break;
+    }
+    return copied;
 }
 
 fn fileSeekBy(userdata: ?*anyopaque, file: File, offset: i64) File.SeekError!void {
