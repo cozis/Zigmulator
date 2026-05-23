@@ -237,7 +237,7 @@ pub const Host = struct {
         socket.accept_queue.deinit(self.gpa);
     }
 
-    pub fn send(_: *Host, socket: *ConnSocket, source: []const u8) usize {
+    pub fn send(_: *Host, socket: *ConnSocket, source: []const u8) SendError!usize {
         const peer_conn = socket.peer_conn orelse return SendError.NotConnected;
         try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, source);
         return source.len;

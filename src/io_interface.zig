@@ -1079,32 +1079,97 @@ fn randomSecure(userdata: ?*anyopaque, buffer: []u8) RandomSecureError!void {
     @panic("Not implemented yet");
 }
 
+fn nodeFromUserdata(userdata: ?*anyopaque) *Node {
+    return @ptrCast(@alignCast(userdata.?));
+}
+
+fn ipAddressToNodeAddress(address: *const net.IpAddress) ?Node.Address {
+    return switch (address.*) {
+        .ip4 => |ip4| .{
+            .ipv4 = std.mem.readInt(u32, &ip4.bytes, .big),
+            .port = ip4.port,
+        },
+        .ip6 => null,
+    };
+}
+
+fn nodeAddressToIpAddress(address: Node.Address) net.IpAddress {
+    var bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &bytes, address.ipv4, .big);
+    return .{ .ip4 = .{
+        .bytes = bytes,
+        .port = address.port,
+    } };
+}
+
 fn netListenIp(userdata: ?*anyopaque, address: *const net.IpAddress, options: net.IpAddress.ListenOptions) net.IpAddress.ListenError!net.Socket {
-    _ = userdata;
-    _ = address;
-    _ = options;
-    @panic("Not implemented yet");
+    const node = nodeFromUserdata(userdata);
+
+    if (options.mode != .stream)
+        return error.SocketModeUnsupported;
+    if (options.protocol != .tcp)
+        return error.ProtocolUnsupportedBySystem;
+
+    const node_address = ipAddressToNodeAddress(address) orelse return error.AddressFamilyUnsupported;
+    const handle = node.listen(node_address) catch |err| switch (err) {
+        error.DescriptorLimit => return error.ProcessFdQuotaExceeded,
+        error.AddressNotAvailable => return error.AddressUnavailable,
+        error.AddressAlreadyUsed => return error.AddressInUse,
+        error.OutOfMemory => return error.SystemResources,
+    };
+
+    return .{
+        .handle = handle,
+        .address = nodeAddressToIpAddress(node_address),
+    };
 }
 
 fn netAccept(userdata: ?*anyopaque, listen_handle: net.Socket.Handle, options: net.Server.AcceptOptions) net.Server.AcceptError!net.Socket {
-    _ = userdata;
-    _ = listen_handle;
+    const node = nodeFromUserdata(userdata);
     _ = options;
-    @panic("Not implemented yet");
+
+    const handle = node.accept(listen_handle) catch |err| switch (err) {
+        error.DescriptorLimit => return error.ProcessFdQuotaExceeded,
+        error.InvalidHandle => return error.SocketNotListening,
+        error.AcceptQueueEmpty => return error.WouldBlock,
+        error.OutOfMemory => return error.SystemResources,
+    };
+
+    return .{
+        .handle = handle,
+        .address = .{ .ip4 = .unspecified(0) },
+    };
 }
 
 fn netBindIp(userdata: ?*anyopaque, address: *const net.IpAddress, options: net.IpAddress.BindOptions) net.IpAddress.BindError!net.Socket {
     _ = userdata;
     _ = address;
     _ = options;
-    @panic("Not implemented yet");
+    return error.OptionUnsupported;
 }
 
 fn netConnectIp(userdata: ?*anyopaque, address: *const net.IpAddress, options: net.IpAddress.ConnectOptions) net.IpAddress.ConnectError!net.Socket {
-    _ = userdata;
-    _ = address;
-    _ = options;
-    @panic("Not implemented yet");
+    const node = nodeFromUserdata(userdata);
+
+    if (options.mode != .stream)
+        return error.SocketModeUnsupported;
+    if (options.protocol) |protocol| {
+        if (protocol != .tcp)
+            return error.ProtocolUnsupportedBySystem;
+    }
+
+    const node_address = ipAddressToNodeAddress(address) orelse return error.AddressFamilyUnsupported;
+    const handle = node.connect(node_address) catch |err| switch (err) {
+        error.DescriptorLimit => return error.ProcessFdQuotaExceeded,
+        error.UnavailableHost => return error.HostUnreachable,
+        error.PeerNotListeningOnAddress => return error.ConnectionRefused,
+        error.OutOfMemory => return error.SystemResources,
+    };
+
+    return .{
+        .handle = handle,
+        .address = nodeAddressToIpAddress(node_address),
+    };
 }
 
 fn netListenUnix(userdata: ?*anyopaque, address: *const net.UnixAddress, options: net.UnixAddress.ListenOptions) net.UnixAddress.ListenError!net.Socket.Handle {
@@ -1127,28 +1192,78 @@ fn netSocketCreatePair(userdata: ?*anyopaque, options: net.Socket.CreatePairOpti
 }
 
 fn netSend(userdata: ?*anyopaque, handle: net.Socket.Handle, messages: []net.OutgoingMessage, flags: net.SendFlags) struct { ?net.Socket.SendError, usize } {
-    _ = userdata;
-    _ = handle;
-    _ = messages;
+    const node = nodeFromUserdata(userdata);
     _ = flags;
-    @panic("Not implemented yet");
+
+    for (messages, 0..) |*message, index| {
+        const source = message.data_ptr[0..message.data_len];
+        const written = node.writeSocket(handle, source) catch |err| switch (err) {
+            error.InvalidHandle => return .{ error.SocketUnconnected, index },
+            error.NotConnected => return .{ error.SocketUnconnected, index },
+            error.OutOfMemory => return .{ error.SystemResources, index },
+        };
+        message.data_len = written;
+    }
+
+    return .{ null, messages.len };
 }
 
 /// Returns 0 on end of stream.
 fn netRead(userdata: ?*anyopaque, fd: net.Socket.Handle, data: [][]u8) net.Stream.Reader.Error!usize {
-    _ = userdata;
-    _ = fd;
-    _ = data;
-    @panic("Not implemented yet");
+    const node = nodeFromUserdata(userdata);
+    var copied: usize = 0;
+
+    for (data) |buffer| {
+        if (buffer.len == 0)
+            continue;
+
+        const n = node.readSocket(fd, buffer) catch |err| switch (err) {
+            error.InvalidHandle => return error.SocketUnconnected,
+        };
+        copied += n;
+
+        if (n < buffer.len)
+            break;
+    }
+
+    return copied;
 }
 
 fn netWrite(userdata: ?*anyopaque, handle: net.Socket.Handle, header: []const u8, data: []const []const u8, splat: usize) net.Stream.Writer.Error!usize {
-    _ = userdata;
-    _ = handle;
-    _ = header;
-    _ = data;
-    _ = splat;
-    @panic("Not implemented yet");
+    const node = nodeFromUserdata(userdata);
+    var copied: usize = 0;
+
+    if (header.len != 0)
+        copied += node.writeSocket(handle, header) catch |err| switch (err) {
+            error.InvalidHandle => return error.SocketUnconnected,
+            error.NotConnected => return error.SocketUnconnected,
+            error.OutOfMemory => return error.SystemResources,
+        };
+
+    if (data.len != 0) {
+        for (data[0 .. data.len - 1]) |bytes| {
+            if (bytes.len == 0)
+                continue;
+            copied += node.writeSocket(handle, bytes) catch |err| switch (err) {
+                error.InvalidHandle => return error.SocketUnconnected,
+                error.NotConnected => return error.SocketUnconnected,
+                error.OutOfMemory => return error.SystemResources,
+            };
+        }
+
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            if (pattern.len == 0)
+                break;
+            copied += node.writeSocket(handle, pattern) catch |err| switch (err) {
+                error.InvalidHandle => return error.SocketUnconnected,
+                error.NotConnected => return error.SocketUnconnected,
+                error.OutOfMemory => return error.SystemResources,
+            };
+        }
+    }
+
+    return copied;
 }
 
 fn netWriteFile(userdata: ?*anyopaque, socket_handle: net.Socket.Handle, header: []const u8, file_reader: *Io.File.Reader, limit: Io.Limit) net.Stream.Writer.WriteFileError!usize {
@@ -1161,16 +1276,20 @@ fn netWriteFile(userdata: ?*anyopaque, socket_handle: net.Socket.Handle, header:
 }
 
 fn netClose(userdata: ?*anyopaque, handles: []const net.Socket.Handle) void {
-    _ = userdata;
-    _ = handles;
-    @panic("Not implemented yet");
+    const node = nodeFromUserdata(userdata);
+
+    for (handles) |handle| {
+        node.closeSocket(handle) catch {};
+    }
 }
 
 fn netShutdown(userdata: ?*anyopaque, handle: net.Socket.Handle, how: net.ShutdownHow) net.ShutdownError!void {
-    _ = userdata;
-    _ = handle;
+    const node = nodeFromUserdata(userdata);
     _ = how;
-    @panic("Not implemented yet");
+
+    node.closeSocket(handle) catch |err| switch (err) {
+        error.InvalidHandle => return error.SocketUnconnected,
+    };
 }
 
 fn netInterfaceNameResolve(userdata: ?*anyopaque, name: *const net.Interface.Name) net.Interface.Name.ResolveError!net.Interface {
