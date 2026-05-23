@@ -223,9 +223,9 @@ pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileErro
 
 pub const OpenFileError = error {
     DescriptorLimit,
-} || FileSystem.OpenError;
+} || HandleError || FileSystem.OpenError;
 
-pub fn openFile(self: *Node, parent: ?Handle, path: []const u8) !Handle {
+pub fn openFile(self: *Node, parent: ?Handle, path: []const u8) OpenFileError!Handle {
     self.scheduler.sleep(10);
     const desc = self.unusedDesc() orelse return OpenFileError.DescriptorLimit;
     try self.file_system.openFile(path, try self.handleToOpenDirOrNULL(parent), &desc.file);

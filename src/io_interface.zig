@@ -403,11 +403,44 @@ fn dirAccess(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, options: Dir
 }
 
 fn dirCreateFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: Dir.CreateFileOptions) File.OpenError!File {
-    _ = userdata;
-    _ = dir;
-    _ = sub_path;
-    _ = flags;
-    @panic("Not implemented yet");
+    _ = flags; // TODO: Use flags
+
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const parent = if (dir.handle == Dir.cwd().handle) null else dir.handle;
+
+    node.createFile(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.CreateFileError.InvalidHandle          => unreachable,
+            Node.CreateFileError.ExistsAlready          => File.OpenError.PathAlreadyExists,
+            Node.CreateFileError.EmptyPath              => File.OpenError.BadPathName,
+            Node.CreateFileError.NoRootParent           => File.OpenError.FileNotFound,
+            Node.CreateFileError.TooManyComponents      => File.OpenError.NameTooLong,
+            Node.CreateFileError.ResolutionLimit        => File.OpenError.NameTooLong,
+            Node.CreateFileError.ComponentNotDirectory  => File.OpenError.NotDir,
+            Node.CreateFileError.ComponentNotFound      => File.OpenError.FileNotFound,
+            Node.CreateFileError.OutOfMemory            => File.OpenError.SystemResources,
+        };
+    };
+
+    const handle = node.openFile(parent, sub_path) catch |e| {
+        return switch (e) {
+            Node.OpenFileError.InvalidHandle            => unreachable,
+            Node.OpenFileError.DescriptorLimit          => File.OpenError.ProcessFdQuotaExceeded,
+            Node.OpenFileError.IsDirectory              => File.OpenError.IsDir,
+            Node.OpenFileError.NotDirectory             => File.OpenError.NotDir,
+            Node.OpenFileError.EmptyPath                => File.OpenError.BadPathName,
+            Node.OpenFileError.NoRootParent             => File.OpenError.FileNotFound,
+            Node.OpenFileError.TooManyComponents        => File.OpenError.NameTooLong,
+            Node.OpenFileError.ResolutionLimit          => File.OpenError.NameTooLong,
+            Node.OpenFileError.ComponentNotDirectory    => File.OpenError.NotDir,
+            Node.OpenFileError.ComponentNotFound        => File.OpenError.FileNotFound,
+        };
+    };
+
+    return .{
+        .handle = handle,
+        .flags = .{ .nonblocking = false },
+    };
 }
 
 fn dirCreateFileAtomic(userdata: ?*anyopaque, dir: Dir, dest_path: []const u8, options: Dir.CreateFileAtomicOptions) Dir.CreateFileAtomicError!File.Atomic {
