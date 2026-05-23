@@ -103,4 +103,16 @@ pub fn build(b: *std.Build) void {
     list_dir_exe.root_module.addImport("zigmulator", zigmulator);
     const install_list_dir_exe = b.addInstallArtifact(list_dir_exe, .{});
     examples_step.dependOn(&install_list_dir_exe.step);
+
+    const sleep_exe = b.addExecutable(.{
+        .name = "sleep",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/sleep.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    sleep_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_sleep_exe = b.addInstallArtifact(sleep_exe, .{});
+    examples_step.dependOn(&install_sleep_exe.step);
 }
