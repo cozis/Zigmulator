@@ -132,6 +132,10 @@ pub fn processInit(self: *Node) std.process.Init {
     };
 }
 
+pub fn sleep(self: *Node, delta_us: u64) void {
+    self.scheduler.sleep(delta_us);
+}
+
 fn unusedDesc(self: *Node) ?*Descriptor {
     for (&self.descriptors) |*desc| {
         if (desc.kind == .unused)
