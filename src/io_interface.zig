@@ -517,10 +517,40 @@ fn dirClose(userdata: ?*anyopaque, dirs: []const Dir) void {
 }
 
 fn dirRead(userdata: ?*anyopaque, dr: *Dir.Reader, buffer: []Dir.Entry) Dir.Reader.Error!usize {
-    _ = userdata;
-    _ = dr;
-    _ = buffer;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+
+    if (dr.state == .finished)
+        return 0;
+
+    if (dr.state == .reset) {
+        node.resetDir(dr.dir.handle) catch |e| switch (e) {
+            error.InvalidHandle => return Dir.Reader.Error.AccessDenied,
+        };
+        dr.state = .reading;
+    }
+
+    var count: usize = 0;
+    while (count < buffer.len) {
+        const entry = node.readDir(dr.dir.handle) catch |e| switch (e) {
+            error.InvalidHandle => return Dir.Reader.Error.AccessDenied,
+            error.NoMoreItems => {
+                dr.state = .finished;
+                return count;
+            },
+        };
+
+        if (std.mem.eql(u8, entry.name, ".") or std.mem.eql(u8, entry.name, ".."))
+            continue;
+
+        buffer[count] = .{
+            .name = entry.name,
+            .kind = if (entry.is_dir) .directory else .file,
+            .inode = 0,
+        };
+        count += 1;
+    }
+
+    return count;
 }
 
 fn dirRealPath(userdata: ?*anyopaque, dir: Dir, out_buffer: []u8) Dir.RealPathError!usize {
