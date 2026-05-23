@@ -140,7 +140,18 @@ const ResolveParent = struct {
 
 const ResolveParentError = ParsePathError || ResolvePathError;
 
-pub const DeleteError = ResolveParentError;
+pub const DeleteError = ResolveParentError || error {
+    NotFound,
+};
+
+pub const DeleteFileError = DeleteError || error {
+    IsDirectory,
+};
+
+pub const DeleteDirError = DeleteError || error {
+    NotDirectory,
+    DirNotEmpty,
+};
 
 pub const OpenError = error {
     IsDirectory,
@@ -269,8 +280,21 @@ pub fn createDir(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, gpa: 
     return self.createAny(path, root_dir, true, gpa);
 }
 
-pub fn deleteAny(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, gpa: Allocator) DeleteError!void {
+pub fn deleteFile(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, gpa: Allocator) DeleteFileError!void {
     const result = try self.resolveParent(path, if (root_dir) |r| r.entity else null);
+    const child = result.parent.findChild(result.basename) orelse return DeleteFileError.NotFound;
+    if (child.addr.is_dir)
+        return DeleteFileError.IsDirectory;
+    try result.parent.removeChild(gpa, result.basename);
+}
+
+pub fn deleteDir(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, gpa: Allocator) DeleteDirError!void {
+    const result = try self.resolveParent(path, if (root_dir) |r| r.entity else null);
+    const child = result.parent.findChild(result.basename) orelse return DeleteDirError.NotFound;
+    if (!child.addr.is_dir)
+        return DeleteDirError.NotDirectory;
+    if (child.addr.children.items.len != 0)
+        return DeleteDirError.DirNotEmpty;
     try result.parent.removeChild(gpa, result.basename);
 }
 
