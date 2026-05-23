@@ -1014,9 +1014,22 @@ fn clockResolution(userdata: ?*anyopaque, clock: Clock) Clock.ResolutionError!Du
 }
 
 fn sleep(userdata: ?*anyopaque, timeout: Timeout) Cancelable!void {
-    _ = userdata;
-    _ = timeout;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+
+    const duration = switch (timeout) {
+        .none => return,
+        .duration => |d| d.raw,
+        .deadline => |d| now(userdata, d.clock).durationTo(d.raw),
+    };
+
+    if (duration.nanoseconds <= 0)
+        return;
+
+    const delta_us = std.math.cast(u64, @divTrunc(duration.nanoseconds + std.time.ns_per_us - 1, std.time.ns_per_us)) orelse std.math.maxInt(u64);
+    if (delta_us == 0)
+        return;
+
+    node.sleep(delta_us);
 }
 
 fn random(userdata: ?*anyopaque, buffer: []u8) void {
