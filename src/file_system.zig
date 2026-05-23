@@ -400,6 +400,11 @@ pub fn readDir(self: *FileSystem, open_dir: *OpenDir) ReadDirError!ReadDir {
     };
 }
 
+pub fn resetDir(self: *FileSystem, open_dir: *OpenDir) void {
+    _ = self;
+    open_dir.cursor = 0;
+}
+
 pub fn readFile(self: *FileSystem, open_file: *OpenFile, offset_maybe: ?usize, target: []u8) usize {
     _ = self;
     const offset = offset_maybe orelse open_file.cursor;
