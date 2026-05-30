@@ -115,4 +115,20 @@ pub fn build(b: *std.Build) void {
     sleep_exe.root_module.addImport("zigmulator", zigmulator);
     const install_sleep_exe = b.addInstallArtifact(sleep_exe, .{});
     examples_step.dependOn(&install_sleep_exe.step);
+
+    const tcp_ping_pong_exe = b.addExecutable(.{
+        .name = "tcp_ping_pong",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/tcp_ping_pong.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    tcp_ping_pong_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_tcp_ping_pong_exe = b.addInstallArtifact(tcp_ping_pong_exe, .{});
+    examples_step.dependOn(&install_tcp_ping_pong_exe.step);
+
+    const run_tcp_ping_pong_cmd = b.addRunArtifact(tcp_ping_pong_exe);
+    const tcp_ping_pong_step = b.step("tcp_ping_pong", "Run the TCP ping-pong example");
+    tcp_ping_pong_step.dependOn(&run_tcp_ping_pong_cmd.step);
 }
