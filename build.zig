@@ -116,6 +116,18 @@ pub fn build(b: *std.Build) void {
     const install_sleep_exe = b.addInstallArtifact(sleep_exe, .{});
     examples_step.dependOn(&install_sleep_exe.step);
 
+    const select_group_async_exe = b.addExecutable(.{
+        .name = "select_group_async",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/select_group_async.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    select_group_async_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_select_group_async_exe = b.addInstallArtifact(select_group_async_exe, .{});
+    examples_step.dependOn(&install_select_group_async_exe.step);
+
     const tcp_ping_pong_exe = b.addExecutable(.{
         .name = "tcp_ping_pong",
         .root_module = b.createModule(.{
