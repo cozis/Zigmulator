@@ -1215,7 +1215,7 @@ fn netRead(userdata: ?*anyopaque, fd: net.Socket.Handle, data: [][]u8) net.Strea
         if (buffer.len == 0)
             continue;
 
-        const n = node.readSocket(fd, buffer) catch |err| switch (err) {
+        const n = node.readSocket(fd, buffer, true) catch |err| switch (err) {
             error.InvalidHandle => return error.SocketUnconnected,
         };
         copied += n;

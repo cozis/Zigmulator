@@ -417,10 +417,30 @@ pub fn connect(self: *Node, address: Address) ConnectError!Handle {
     return self.descToHandle(desc);
 }
 
-pub fn readSocket(self: *Node, handle: Handle, target: []u8) HandleError!usize {
-    self.scheduler.sleep(10);
+pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) HandleError!usize {
+    if (target.len == 0)
+        return 0;
+
     const desc = try self.handleToDescOfType(handle, .conn);
-    return self.network_host.read(&desc.conn, target);
+
+    if (block) {
+        while (true) {
+            self.scheduler.sleep(10);
+
+            const num = self.network_host.read(&desc.conn, target);
+
+            if (num > 0)
+                return num;
+
+            if (num == 0) {
+                if (!self.network_host.isConnected(&desc.conn))
+                    return 0;
+            }
+        }
+        unreachable;
+    } else {
+        return self.network_host.read(&desc.conn, target);
+    }
 }
 
 pub const WriteSocketError = HandleError || Network.SendError;
