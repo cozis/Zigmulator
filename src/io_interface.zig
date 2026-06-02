@@ -227,10 +227,8 @@ fn groupAsync(
 ) void {
     _ = userdata;
     _ = type_erased;
-    _ = context;
     _ = context_alignment;
-    _ = start;
-    @panic("Not implemented yet");
+    start(context.ptr);
 }
 
 fn groupConcurrent(
