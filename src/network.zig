@@ -251,6 +251,10 @@ pub const Host = struct {
         }
         return num;
     }
+
+    pub fn isConnected(_: *Host, socket: *ConnSocket) bool {
+        return socket.peer_conn != null;
+    }
 };
 
 gpa: Allocator,
