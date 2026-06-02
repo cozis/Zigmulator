@@ -483,6 +483,10 @@ fn dumpEntity(entity: *Entity, depth: u32) void {
 }
 
 pub fn dump(self: *FileSystem) void {
-    dumpEntity(self.root, 0);
-    std.debug.print("\n", .{});
+    if (self.root.children.items.len == 0) {
+        std.debug.print("(no files)\n", .{});
+    } else {
+        dumpEntity(self.root, 0);
+        std.debug.print("\n", .{});
+    }
 }
