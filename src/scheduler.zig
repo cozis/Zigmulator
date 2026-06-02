@@ -17,6 +17,9 @@ const ContextSwitch = extern struct {
     new: *Registers,
 };
 
+const STACK_CANARY_SIZE = 256;
+const STACK_CANARY_BYTE = 0xa5;
+
 const State = enum {
     ready,
     running,
@@ -32,6 +35,15 @@ const Task = struct {
     state : State,
     wakeup: ?u64,
     node  : *Node,
+
+    fn stackCanaryIsIntact(self: *Task) bool {
+        const canary = self.stack[0..STACK_CANARY_SIZE];
+        for (canary) |byte| {
+            if (byte != STACK_CANARY_BYTE)
+                return false;
+        }
+        return true;
+    }
 };
 
 gpa: Allocator,
@@ -56,8 +68,12 @@ pub fn deinit(self: *Scheduler) void {
 
 pub fn spawn(self: *Scheduler, node: *Node, entry: EntryPoint, stack_size: usize) !void {
 
-    const stack = try std.heap.page_allocator.alignedAlloc(u8, .fromByteUnits(16), stack_size);
+    if (stack_size > std.math.maxInt(usize) - STACK_CANARY_SIZE)
+        return Allocator.Error.OutOfMemory;
+
+    const stack = try std.heap.page_allocator.alignedAlloc(u8, .fromByteUnits(16), stack_size + STACK_CANARY_SIZE);
     errdefer std.heap.page_allocator.free(stack);
+    @memset(stack[0..STACK_CANARY_SIZE], STACK_CANARY_BYTE);
 
     var stack_top = @intFromPtr(stack.ptr) + stack.len;
     stack_top &= ~@as(usize, 0xf);
@@ -127,6 +143,8 @@ pub fn scheduleOne(self: *Scheduler) bool {
     self.current = task;
     task.state = .running;
     contextSwitch(&self.regs, &task.regs);
+    if (!task.stackCanaryIsIntact())
+        @panic("Task stack canary was overwritten");
     return true;
 }
 
