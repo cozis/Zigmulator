@@ -450,12 +450,18 @@ pub const AcceptError = error {
 } || HandleError || Network.AcceptError || CancelError;
 
 pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
-    try self.scheduler.sleep(10);
     const old_desc = try self.handleToDescOfType(handle, .listen);
     const new_desc = self.unusedDesc() orelse return AcceptError.DescriptorLimit;
-    try self.network_host.accept(&old_desc.listen, &new_desc.conn);
-    new_desc.kind = .conn;
-    return self.descToHandle(new_desc);
+
+    while (true) {
+        try self.scheduler.sleep(10);
+        self.network_host.accept(&old_desc.listen, &new_desc.conn) catch |err| switch (err) {
+            error.AcceptQueueEmpty => continue,
+            else => return err,
+        };
+        new_desc.kind = .conn;
+        return self.descToHandle(new_desc);
+    }
 }
 
 pub const ConnectError = error {
