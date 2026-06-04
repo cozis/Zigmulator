@@ -163,8 +163,12 @@ pub fn wait(self: *Node, ids: []const TaskID) !TaskID {
     return self.scheduler.wait(ids);
 }
 
-pub fn futexWait(self: *Node, ptr: *const u32, expected: u32) void {
-    self.scheduler.futexWait(ptr, expected);
+pub fn futexWait(self: *Node, ptr: *const u32, expected: u32) !void {
+    return self.scheduler.futexWait(ptr, expected);
+}
+
+pub fn futexWaitUncancelable(self: *Node, ptr: *const u32, expected: u32) void {
+    self.scheduler.futexWaitUncancelable(ptr, expected);
 }
 
 pub fn futexWake(self: *Node, ptr: *const u32, max_waiters: u32) void {
