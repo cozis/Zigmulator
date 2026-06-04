@@ -45,7 +45,11 @@ const Task = struct {
     context: ?*const anyopaque,
     state : State,
     node  : *Node,
+
+    // If this is a subtask, parent_id refers to the parent.
+    // The cancel flag is set when the parent requests cancellation.
     parent_id: ?TaskID,
+    cancel: bool,
 
     // These fields are only used when state=.blocked and
     // are not mutually exclusive. Each represents a different
@@ -138,6 +142,7 @@ fn spawnInner(
         .wakeup_futex = null,
         .node   = node,
         .parent_id = parent_id,
+        .cancel = false,
     };
 
     try self.tasks.append(self.gpa, task);
@@ -375,4 +380,14 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.wakeup_futex = null;
         contextSwitch(&task.regs, &self.regs);
     }
+}
+
+pub fn cancel(self: *Scheduler, id: TaskID) !void {
+    const child = self.findTaskByID(id)
+        orelse return error.InvalidHandle;
+
+    if (child.parent_id != self.current_id)
+        return error.InvalidHandle;
+
+    child.cancel = true;
 }
