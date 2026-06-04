@@ -388,25 +388,19 @@ fn checkCancel(userdata: ?*anyopaque) Cancelable!void {
 }
 
 fn futexWait(userdata: ?*anyopaque, ptr: *const u32, expected: u32, timeout: Timeout) Cancelable!void {
-    _ = userdata;
-    _ = ptr;
-    _ = expected;
     _ = timeout;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.futexWait(ptr, expected);
 }
 
 fn futexWaitUncancelable(userdata: ?*anyopaque, ptr: *const u32, expected: u32) void {
-    _ = userdata;
-    _ = ptr;
-    _ = expected;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.futexWait(ptr, expected);
 }
 
 fn futexWake(userdata: ?*anyopaque, ptr: *const u32, max_waiters: u32) void {
-    _ = userdata;
-    _ = ptr;
-    _ = max_waiters;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.futexWake(ptr, max_waiters);
 }
 
 fn operate(userdata: ?*anyopaque, operation: Operation) Cancelable!Operation.Result {
