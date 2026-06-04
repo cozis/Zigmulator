@@ -151,6 +151,14 @@ pub fn wait(self: *Node, ids: []const TaskID) !TaskID {
     return self.scheduler.wait(ids);
 }
 
+pub fn futexWait(self: *Node, ptr: *const u32, expected: u32) void {
+    self.scheduler.futexWait(ptr, expected);
+}
+
+pub fn futexWake(self: *Node, ptr: *const u32, max_waiters: u32) void {
+    self.scheduler.futexWake(ptr, max_waiters);
+}
+
 fn unusedDesc(self: *Node) ?*Descriptor {
     for (&self.descriptors) |*desc| {
         if (desc.kind == .unused)
