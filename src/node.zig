@@ -343,6 +343,14 @@ pub fn fileSize(self: *Node, handle: Handle) FileSizeError!u64 {
     return @intCast(self.file_system.fileSize(&desc.file));
 }
 
+pub const SyncFileError = HandleError || CancelError;
+
+pub fn syncFile(self: *Node, handle: Handle) SyncFileError!void {
+    try self.scheduler.sleep(2);
+    const desc = try self.handleToDescOfType(handle, .file);
+    self.file_system.syncFile(&desc.file);
+}
+
 pub const ReadFileError = HandleError || CancelError;
 
 pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadFileError!usize {
