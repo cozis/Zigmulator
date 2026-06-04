@@ -384,14 +384,16 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
     }
 }
 
-pub fn cancel(self: *Scheduler, id: TaskID) !void {
-    const child = self.findTaskByID(id)
-        orelse return error.InvalidHandle;
-
-    if (child.parent_id != self.current_id)
-        return error.InvalidHandle;
-
+pub fn cancel(self: *Scheduler, id: TaskID) void {
+    const child = self.findTaskByID(id) orelse return;
+    std.debug.assert(child.parent_id == self.current_id);
     child.cancel = true;
+    if (child.state == .blocked) {
+        child.state = .ready;
+        child.wakeup_time = null;
+        child.wakeup_tasks = null;
+        child.wakeup_futex = null;
+    }
 }
 
 pub fn checkCancel(self: *Scheduler) !void {

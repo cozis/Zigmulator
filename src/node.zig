@@ -147,8 +147,8 @@ pub fn despawn(self: *Node, id: TaskID) void {
     self.scheduler.despawnNested(id);
 }
 
-pub fn cancel(self: *Node, id: TaskID) !void {
-    try self.scheduler.cancel(id);
+pub fn cancel(self: *Node, id: TaskID) void {
+    self.scheduler.cancel(id);
 }
 
 pub fn checkCancel(self: *Node) !void {
