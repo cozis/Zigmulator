@@ -52,6 +52,7 @@ const Task = struct {
     // wakeup condition.
     wakeup_time: ?u64,
     wakeup_tasks: ?[]const TaskID,
+    wakeup_futex: ?*const u32,
 
     fn stackCanaryIsIntact(self: *Task) bool {
         const canary = self.stack[0..STACK_CANARY_SIZE];
@@ -134,6 +135,7 @@ fn spawnInner(
         .state  = .ready,
         .wakeup_time = null,
         .wakeup_tasks = null,
+        .wakeup_futex = null,
         .node   = node,
         .parent_id = parent_id,
     };
@@ -196,6 +198,7 @@ fn advanceTimeAndUnblockTasks(self: *Scheduler, new_time: u64) void {
                     task.state = .ready;
                     task.wakeup_time = null;
                     task.wakeup_tasks = null;
+                    task.wakeup_futex = null;
                 }
             }
         }
@@ -287,12 +290,14 @@ fn taskStart(self: *Scheduler) callconv(.c) noreturn {
     current.state = if (failed) .failed else .returned;
     current.wakeup_time = null;
     current.wakeup_tasks = null;
+    current.wakeup_futex = null;
     if (current.parent_id) |parent_id| {
         if (self.findTaskByID(parent_id)) |parent| {
             if (taskIsWaitingFor(parent, current.id)) {
                 parent.state = .ready;
                 parent.wakeup_time = null;
                 parent.wakeup_tasks = null;
+                parent.wakeup_futex = null;
             }
         }
     }
@@ -311,7 +316,35 @@ pub fn sleep(self: *Scheduler, delta_us: u64) void {
     current.state = .blocked;
     current.wakeup_time = self.current_time + delta_us;
     current.wakeup_tasks = null;
+    current.wakeup_futex = null;
     contextSwitch(&current.regs, &self.regs);
+}
+
+pub fn futexWait(self: *Scheduler, ptr: *const u32, expected: u32) void {
+    if (@atomicLoad(u32, ptr, .seq_cst) != expected)
+        return;
+
+    const current = self.findTaskByID(self.current_id.?).?;
+    current.state = .blocked;
+    current.wakeup_time = null;
+    current.wakeup_tasks = null;
+    current.wakeup_futex = ptr;
+    contextSwitch(&current.regs, &self.regs);
+}
+
+pub fn futexWake(self: *Scheduler, ptr: *const u32, max_waiters: u32) void {
+    var woken: u32 = 0;
+    for (self.tasks.items) |*task| {
+        if (woken == max_waiters)
+            break;
+        if (task.state == .blocked and task.wakeup_futex == ptr) {
+            task.state = .ready;
+            task.wakeup_time = null;
+            task.wakeup_tasks = null;
+            task.wakeup_futex = null;
+            woken += 1;
+        }
+    }
 }
 
 fn findCompletedTaskInSet(self: *Scheduler, ids: []const TaskID) !?*Task {
@@ -339,6 +372,7 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.state = .blocked;
         task.wakeup_time = null;
         task.wakeup_tasks = ids;
+        task.wakeup_futex = null;
         contextSwitch(&task.regs, &self.regs);
     }
 }
