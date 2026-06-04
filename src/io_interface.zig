@@ -350,6 +350,34 @@ fn groupConcurrent(
     @panic("Not implemented yet\n");
 }
 
+fn cancelGroupTasks(node: *Node, group: *TaskGroup) void {
+    for (group.ids.items) |id| {
+        node.cancel(id);
+    }
+}
+
+fn drainGroup(node: *Node, group: *TaskGroup) Cancelable!void {
+    while (group.ids.items.len > 0) {
+        const id = node.wait(group.ids.items) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
+            else => @panic("TODO"),
+        };
+        group.remove(id);
+        node.despawn(id);
+    }
+}
+
+fn drainGroupUncancelable(node: *Node, group: *TaskGroup) void {
+    while (group.ids.items.len > 0) {
+        const id = node.wait(group.ids.items) catch |err| switch (err) {
+            error.Canceled => continue,
+            else => @panic("TODO"),
+        };
+        group.remove(id);
+        node.despawn(id);
+    }
+}
+
 fn groupAwait(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopaque) Cancelable!void {
     const node: *Node = @ptrCast(@alignCast(userdata.?));
     const group: *TaskGroup = @ptrCast(@alignCast(initial_token));
@@ -360,20 +388,27 @@ fn groupAwait(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopa
         type_erased.state = 0;
     }
 
-    while (group.ids.items.len > 0) {
-        const id = node.wait(group.ids.items) catch @panic("TODO");
-        group.remove(id);
-        node.despawn(id);
-    }
+    drainGroup(node, group) catch |err| switch (err) {
+        error.Canceled => {
+            cancelGroupTasks(node, group);
+            drainGroupUncancelable(node, group);
+            return error.Canceled;
+        },
+    };
 }
 
 fn groupCancel(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopaque) void {
     const node: *Node = @ptrCast(@alignCast(userdata.?));
     const group: *TaskGroup = @ptrCast(@alignCast(initial_token));
-    for (group.ids.items) |id| {
-        node.cancel(id);
+    defer {
+        group.deinit();
+        node.gpa.destroy(group);
+        type_erased.token.store(null, .release);
+        type_erased.state = 0;
     }
-    groupAwait(userdata, type_erased, initial_token) catch {};
+
+    cancelGroupTasks(node, group);
+    drainGroupUncancelable(node, group);
 }
 
 fn recancel(userdata: ?*anyopaque) void {
