@@ -22,6 +22,7 @@ const Duration          = Io.Duration;
 const RandomSecureError = Io.RandomSecureError;
 const Queue             = Io.Queue;
 const Allocator         = std.mem.Allocator;
+const TaskID            = Node.TaskID;
 
 pub fn buildIOInterfaceForNode(node: *Node) Io {
     return .{
@@ -218,6 +219,78 @@ fn cancel(
     @panic("Not implemented yet");
 }
 
+const TaskContext = struct {
+    context_alignment: std.mem.Alignment,
+    alloc_len: usize,
+
+    fn ptr(self: *TaskContext) [*]u8 {
+        const base: [*]u8 = @ptrCast(self);
+        const offset = self.context_alignment.forward(@intFromPtr(base) + @sizeOf(TaskContext)) - @intFromPtr(base);
+        return base + offset;
+    }
+
+    fn alloc(self: *TaskContext) []align(@alignOf(TaskContext)) u8 {
+        const base: [*]align(@alignOf(TaskContext)) u8 = @ptrCast(self);
+        return base[0..self.alloc_len];
+    }
+};
+
+const TaskGroup = struct {
+    gpa: Allocator,
+    ids: std.ArrayList(TaskID) = .empty,
+    contexts: std.ArrayList(*TaskContext) = .empty,
+
+    fn init(gpa: Allocator) TaskGroup {
+        return .{
+            .gpa = gpa,
+        };
+    }
+
+    fn add(self: *TaskGroup, id: TaskID, context: *TaskContext) !void {
+        try self.ids.append(self.gpa, id);
+        errdefer _ = self.ids.pop();
+        try self.contexts.append(self.gpa, context);
+    }
+
+    fn remove(self: *TaskGroup, id: TaskID) void {
+        var found: ?usize = null;
+        for (self.ids.items, 0..) |current_id, i| {
+            if (current_id == id) {
+                found = i;
+                break;
+            }
+        }
+
+        if (found) |i| {
+            const context = self.contexts.items[i];
+            self.gpa.free(context.alloc());
+            _ = self.ids.orderedRemove(i);
+            _ = self.contexts.orderedRemove(i);
+        }
+    }
+
+    fn deinit(self: *TaskGroup) void {
+        for (self.contexts.items) |context| {
+            self.gpa.free(context.alloc());
+        }
+        self.contexts.deinit(self.gpa);
+        self.ids.deinit(self.gpa);
+    }
+};
+
+fn getOrCreatePendingTaskGroup(gpa: Allocator, type_erased: *Group) !*TaskGroup {
+    const token = type_erased.token.load(.acquire);
+    if (token) |ptr| return @ptrCast(@alignCast(ptr));
+
+    const group = try gpa.create(TaskGroup);
+    errdefer gpa.destroy(group);
+    group.* = .init(gpa);
+
+    type_erased.token.store(@ptrCast(group), .release);
+    type_erased.state = 0;
+    return group;
+}
+
 fn groupAsync(
     userdata: ?*anyopaque,
     type_erased: *Group,
@@ -225,10 +298,41 @@ fn groupAsync(
     context_alignment: std.mem.Alignment,
     start: *const fn (context: *const anyopaque) void,
 ) void {
-    _ = userdata;
-    _ = type_erased;
-    _ = context_alignment;
-    start(context.ptr);
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+
+    const group = getOrCreatePendingTaskGroup(node.gpa, type_erased) catch {
+        start(context.ptr);
+        return;
+    };
+
+    const max_context_misalignment = context_alignment.toByteUnits() -| @alignOf(TaskContext);
+    const worst_case_context_offset = context_alignment.forward(@sizeOf(TaskContext) + max_context_misalignment);
+    const alloc_len = worst_case_context_offset + context.len;
+
+    const alloc = node.gpa.alignedAlloc(u8, .of(TaskContext), alloc_len) catch {
+        start(context.ptr);
+        return;
+    };
+
+    const task_context: *TaskContext = @ptrCast(@alignCast(alloc.ptr));
+    task_context.* = .{
+        .context_alignment = context_alignment,
+        .alloc_len = alloc_len,
+    };
+    @memcpy(task_context.ptr()[0..context.len], context);
+
+    const id = node.spawn(start, task_context.ptr()) catch {
+        node.gpa.free(task_context.alloc());
+        start(context.ptr);
+        return;
+    };
+
+    group.add(id, task_context) catch {
+        node.despawn(id);
+        node.gpa.free(task_context.alloc());
+        start(context.ptr);
+        return;
+    };
 }
 
 fn groupConcurrent(
@@ -243,21 +347,28 @@ fn groupConcurrent(
     _ = context;
     _ = context_alignment;
     _ = start;
-    @panic("Not implemented yet");
+    @panic("Not implemented yet\n");
 }
 
 fn groupAwait(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopaque) Cancelable!void {
-    _ = userdata;
-    _ = type_erased;
-    _ = initial_token;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const group: *TaskGroup = @ptrCast(@alignCast(initial_token));
+    defer {
+        group.deinit();
+        node.gpa.destroy(group);
+        type_erased.token.store(null, .release);
+        type_erased.state = 0;
+    }
+
+    while (group.ids.items.len > 0) {
+        const id = node.wait(group.ids.items) catch @panic("TODO");
+        group.remove(id);
+        node.despawn(id);
+    }
 }
 
 fn groupCancel(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopaque) void {
-    _ = userdata;
-    _ = type_erased;
-    _ = initial_token;
-    @panic("Not implemented yet");
+    groupAwait(userdata, type_erased, initial_token) catch {};
 }
 
 fn recancel(userdata: ?*anyopaque) void {
