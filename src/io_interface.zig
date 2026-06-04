@@ -368,6 +368,11 @@ fn groupAwait(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopa
 }
 
 fn groupCancel(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyopaque) void {
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const group: *TaskGroup = @ptrCast(@alignCast(initial_token));
+    for (group.ids.items) |id| {
+        node.cancel(id);
+    }
     groupAwait(userdata, type_erased, initial_token) catch {};
 }
 
