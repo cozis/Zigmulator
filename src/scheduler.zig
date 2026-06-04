@@ -380,6 +380,7 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.wakeup_tasks = ids;
         task.wakeup_futex = null;
         contextSwitch(&task.regs, &self.regs);
+        try self.checkCancel();
     }
 }
 
