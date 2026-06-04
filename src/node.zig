@@ -11,6 +11,9 @@ const MAX_DESCRIPTORS = 1<<10;
 const Node = @This();
 const Handle = i32;
 
+pub const TaskID = Scheduler.TaskID;
+const NestedEntryPoint = Scheduler.NestedEntryPoint;
+
 const Descriptor = struct {
 
     const Kind = enum {
@@ -134,6 +137,18 @@ pub fn processInit(self: *Node) std.process.Init {
 
 pub fn sleep(self: *Node, delta_us: u64) void {
     self.scheduler.sleep(delta_us);
+}
+
+pub fn spawn(self: *Node, entry: NestedEntryPoint, context: *const anyopaque) !TaskID {
+    return self.scheduler.spawnNested(self, entry, context);
+}
+
+pub fn despawn(self: *Node, id: TaskID) void {
+    self.scheduler.despawnNested(id);
+}
+
+pub fn wait(self: *Node, ids: []const TaskID) !TaskID {
+    return self.scheduler.wait(ids);
 }
 
 fn unusedDesc(self: *Node) ?*Descriptor {
