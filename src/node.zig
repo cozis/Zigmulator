@@ -135,8 +135,8 @@ pub fn processInit(self: *Node) std.process.Init {
     };
 }
 
-pub fn sleep(self: *Node, delta_us: u64) void {
-    self.scheduler.sleep(delta_us);
+pub fn sleep(self: *Node, delta_us: u64) !void {
+    return self.scheduler.sleep(delta_us);
 }
 
 pub fn spawn(self: *Node, entry: NestedEntryPoint, context: *const anyopaque) !TaskID {
@@ -183,6 +183,10 @@ const HandleError = error {
     InvalidHandle,
 };
 
+pub const CancelError = error {
+    Canceled,
+};
+
 const NUM_SPECIAL_HANDLES = 3;
 
 fn handleToDesc(self: *Node, handle: Handle) HandleError!*Descriptor {
@@ -216,17 +220,19 @@ fn descToHandle(self: *Node, desc: *Descriptor) Handle {
     unreachable;
 }
 
-pub fn closeDir(self: *Node, handle: Handle) HandleError!void {
-    self.scheduler.sleep(10);
+pub const CloseDirError = HandleError || CancelError;
+
+pub fn closeDir(self: *Node, handle: Handle) CloseDirError!void {
+    try self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .dir);
     self.file_system.closeDir(&desc.dir, self.gpa);
     desc.kind = .unused;
 }
 
-pub const CreateDirError = HandleError || FileSystem.CreateError;
+pub const CreateDirError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createDir(self: *Node, parent: ?Handle, path: []const u8) CreateDirError!void {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     return self.file_system.createDir(
         path,
         try self.handleToOpenDirOrNULL(parent),
@@ -236,26 +242,28 @@ pub fn createDir(self: *Node, parent: ?Handle, path: []const u8) CreateDirError!
 
 pub const OpenDirError = error {
     DescriptorLimit,
-} || HandleError || FileSystem.OpenError;
+} || HandleError || FileSystem.OpenError || CancelError;
 
 pub fn openDir(self: *Node, parent: ?Handle, path: []const u8) OpenDirError!Handle {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const desc = self.unusedDesc() orelse return OpenDirError.DescriptorLimit;
     try self.file_system.openDir(path, try self.handleToOpenDirOrNULL(parent), &desc.dir);
     desc.kind = .dir;
     return self.descToHandle(desc);
 }
 
-pub fn resetDir(self: *Node, handle: Handle) HandleError!void {
-    self.scheduler.sleep(2);
+pub const ResetDirError = HandleError || CancelError;
+
+pub fn resetDir(self: *Node, handle: Handle) ResetDirError!void {
+    try self.scheduler.sleep(2);
     const desc = try self.handleToDescOfType(handle, .dir);
     self.file_system.resetDir(&desc.dir);
 }
 
-pub const ReadDirError = HandleError || FileSystem.ReadDirError;
+pub const ReadDirError = HandleError || FileSystem.ReadDirError || CancelError;
 
 pub fn readDir(self: *Node, handle: Handle) ReadDirError!FileSystem.ReadDir {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .dir);
     return self.file_system.readDir(&desc.dir);
 }
@@ -269,10 +277,10 @@ fn handleToOpenDirOrNULL(self: *Node, handle: ?Handle) HandleError!?*FileSystem.
     }
 }
 
-pub const CreateFileError = HandleError || FileSystem.CreateError;
+pub const CreateFileError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createFile(self: *Node, parent: ?Handle, path: []const u8) CreateFileError!void {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     return self.file_system.createFile(
         path,
         try self.handleToOpenDirOrNULL(parent),
@@ -280,10 +288,10 @@ pub fn createFile(self: *Node, parent: ?Handle, path: []const u8) CreateFileErro
     );
 }
 
-pub const DeleteFileError = HandleError || FileSystem.DeleteFileError;
+pub const DeleteFileError = HandleError || FileSystem.DeleteFileError || CancelError;
 
 pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileError!void {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     return self.file_system.deleteFile(
         path,
         try self.handleToOpenDirOrNULL(parent),
@@ -291,10 +299,10 @@ pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileErro
     );
 }
 
-pub const DeleteDirError = HandleError || FileSystem.DeleteDirError;
+pub const DeleteDirError = HandleError || FileSystem.DeleteDirError || CancelError;
 
 pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!void {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     return self.file_system.deleteDir(
         path,
         try self.handleToOpenDirOrNULL(parent),
@@ -304,31 +312,37 @@ pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!
 
 pub const OpenFileError = error {
     DescriptorLimit,
-} || HandleError || FileSystem.OpenError;
+} || HandleError || FileSystem.OpenError || CancelError;
 
 pub fn openFile(self: *Node, parent: ?Handle, path: []const u8) OpenFileError!Handle {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const desc = self.unusedDesc() orelse return OpenFileError.DescriptorLimit;
     try self.file_system.openFile(path, try self.handleToOpenDirOrNULL(parent), &desc.file);
     desc.kind = .file;
     return self.descToHandle(desc);
 }
 
-pub fn closeFile(self: *Node, handle: Handle) HandleError!void {
-    self.scheduler.sleep(10);
+pub const CloseFileError = HandleError || CancelError;
+
+pub fn closeFile(self: *Node, handle: Handle) CloseFileError!void {
+    try self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .file);
     self.file_system.closeFile(&desc.file, self.gpa);
     desc.kind = .unused;
 }
 
-pub fn fileSize(self: *Node, handle: Handle) HandleError!u64 {
-    self.scheduler.sleep(2);
+pub const FileSizeError = HandleError || CancelError;
+
+pub fn fileSize(self: *Node, handle: Handle) FileSizeError!u64 {
+    try self.scheduler.sleep(2);
     const desc = try self.handleToDescOfType(handle, .file);
     return @intCast(self.file_system.fileSize(&desc.file));
 }
 
-pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) HandleError!usize {
-    self.scheduler.sleep(100);
+pub const ReadFileError = HandleError || CancelError;
+
+pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadFileError!usize {
+    try self.scheduler.sleep(100);
     if (handle == 0) {
         @panic("Not implemented yet"); // TODO: stdin
     } else if (handle == 1) {
@@ -355,7 +369,7 @@ fn writeToStderr(self: *Node, source: []const u8) void {
     self.stderr_writer.interface.flush() catch {};
 }
 
-pub const WriteFileError = HandleError || Allocator.Error;
+pub const WriteFileError = HandleError || Allocator.Error || CancelError;
 
 pub fn writeFile(
     self  : *Node,
@@ -365,7 +379,7 @@ pub fn writeFile(
     source: []const []const u8
 ) WriteFileError!usize {
 
-    self.scheduler.sleep(100);
+    try self.scheduler.sleep(100);
 
     if (handle == 0) {
         return HandleError.InvalidHandle;
@@ -400,16 +414,16 @@ pub fn writeFile(
     }
 }
 
-pub const SeekFileError = HandleError || FileSystem.SeekError;
+pub const SeekFileError = HandleError || FileSystem.SeekError || CancelError;
 
 pub fn seekFileTo(self: *Node, handle: Handle, offset: usize) SeekFileError!void {
-    self.scheduler.sleep(2);
+    try self.scheduler.sleep(2);
     const desc = try self.handleToDescOfType(handle, .file);
     self.file_system.seekFileTo(&desc.file, offset);
 }
 
 pub fn seekFileBy(self: *Node, handle: Handle, offset: i64) SeekFileError!void {
-    self.scheduler.sleep(2);
+    try self.scheduler.sleep(2);
     const desc = try self.handleToDescOfType(handle, .file);
     try self.file_system.seekFileBy(&desc.file, offset);
 }
@@ -417,10 +431,10 @@ pub fn seekFileBy(self: *Node, handle: Handle, offset: i64) SeekFileError!void {
 pub const Address = Network.Address;
 pub const ListenError = error {
     DescriptorLimit,
-} || Network.ListenError;
+} || Network.ListenError || CancelError;
 
 pub fn listen(self: *Node, address: Address) ListenError!Handle {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const desc = self.unusedDesc() orelse return ListenError.DescriptorLimit;
     try self.network_host.listen(address, &desc.listen);
     desc.kind = .listen;
@@ -429,10 +443,10 @@ pub fn listen(self: *Node, address: Address) ListenError!Handle {
 
 pub const AcceptError = error {
     DescriptorLimit,
-} || HandleError || Network.AcceptError;
+} || HandleError || Network.AcceptError || CancelError;
 
 pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const old_desc = try self.handleToDescOfType(handle, .listen);
     const new_desc = self.unusedDesc() orelse return AcceptError.DescriptorLimit;
     try self.network_host.accept(&old_desc.listen, &new_desc.conn);
@@ -442,17 +456,19 @@ pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
 
 pub const ConnectError = error {
     DescriptorLimit,
-} || Network.ConnectError;
+} || Network.ConnectError || CancelError;
 
 pub fn connect(self: *Node, address: Address) ConnectError!Handle {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const desc = self.unusedDesc() orelse return ConnectError.DescriptorLimit;
     try self.network_host.connect(address, &desc.conn);
     desc.kind = .conn;
     return self.descToHandle(desc);
 }
 
-pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) HandleError!usize {
+pub const ReadSocketError = HandleError || CancelError;
+
+pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSocketError!usize {
     if (target.len == 0)
         return 0;
 
@@ -460,7 +476,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) Handle
 
     if (block) {
         while (true) {
-            self.scheduler.sleep(10);
+            try self.scheduler.sleep(10);
 
             const num = self.network_host.read(&desc.conn, target);
 
@@ -478,16 +494,18 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) Handle
     }
 }
 
-pub const WriteSocketError = HandleError || Network.SendError;
+pub const WriteSocketError = HandleError || Network.SendError || CancelError;
 
 pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketError!usize {
-    self.scheduler.sleep(10);
+    try self.scheduler.sleep(10);
     const desc = try self.handleToDescOfType(handle, .conn);
     return self.network_host.send(&desc.conn, source);
 }
 
-pub fn closeSocket(self: *Node, handle: Handle) HandleError!void {
-    self.scheduler.sleep(10);
+pub const CloseSocketError = HandleError || CancelError;
+
+pub fn closeSocket(self: *Node, handle: Handle) CloseSocketError!void {
+    try self.scheduler.sleep(10);
     const desc = try self.handleToDesc(handle);
     if (desc.kind == .conn) {
         self.network_host.closeConnSocket(&desc.conn);

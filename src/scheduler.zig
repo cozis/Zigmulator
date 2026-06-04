@@ -316,13 +316,14 @@ fn taskReturned() callconv(.c) noreturn {
 }
 
 // Called by the current task to return control to the scheduler
-pub fn sleep(self: *Scheduler, delta_us: u64) void {
+pub fn sleep(self: *Scheduler, delta_us: u64) !void {
     const current = self.findTaskByID(self.current_id.?).?;
     current.state = .blocked;
     current.wakeup_time = self.current_time + delta_us;
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
     contextSwitch(&current.regs, &self.regs);
+    try self.checkCancel();
 }
 
 pub fn futexWait(self: *Scheduler, ptr: *const u32, expected: u32) void {

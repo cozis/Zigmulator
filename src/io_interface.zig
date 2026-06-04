@@ -428,6 +428,7 @@ fn writeFile(node: *Node, file: File, offset: ?usize, header: []const u8, data: 
     return node.writeFile(file.handle, offset, header, data) catch |err| switch (err) {
         error.InvalidHandle => error.NotOpenForWriting,
         error.OutOfMemory => error.SystemResources,
+        error.Canceled => @panic("TODO"),
     };
 }
 
@@ -467,6 +468,7 @@ fn dirCreateDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, permissio
             Node.CreateDirError.ComponentNotDirectory  => Dir.CreateDirError.NotDir,
             Node.CreateDirError.ComponentNotFound      => Dir.CreateDirError.FileNotFound,
             Node.CreateDirError.OutOfMemory            => Dir.CreateDirError.SystemResources,
+            Node.CreateDirError.Canceled               => @panic("TODO"),
         };
     };
 }
@@ -506,6 +508,7 @@ fn dirOpenDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, options: Di
             Node.OpenDirError.ResolutionLimit          => Dir.OpenError.NameTooLong,
             Node.OpenDirError.ComponentNotDirectory    => Dir.OpenError.NotDir,
             Node.OpenDirError.ComponentNotFound        => Dir.OpenError.FileNotFound,
+            Node.OpenDirError.Canceled                 => @panic("TODO"),
         };
     };
 
@@ -551,6 +554,7 @@ fn dirCreateFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: D
             Node.CreateFileError.ComponentNotDirectory  => File.OpenError.NotDir,
             Node.CreateFileError.ComponentNotFound      => File.OpenError.FileNotFound,
             Node.CreateFileError.OutOfMemory            => File.OpenError.SystemResources,
+            Node.CreateFileError.Canceled               => @panic("TODO"),
         };
     };
 
@@ -566,6 +570,7 @@ fn dirCreateFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: D
             Node.OpenFileError.ResolutionLimit          => File.OpenError.NameTooLong,
             Node.OpenFileError.ComponentNotDirectory    => File.OpenError.NotDir,
             Node.OpenFileError.ComponentNotFound        => File.OpenError.FileNotFound,
+            Node.OpenFileError.Canceled                 => @panic("TODO"),
         };
     };
 
@@ -601,6 +606,7 @@ fn dirOpenFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: Dir
             Node.OpenFileError.ResolutionLimit          => File.OpenError.NameTooLong,
             Node.OpenFileError.ComponentNotDirectory    => File.OpenError.NotDir,
             Node.OpenFileError.ComponentNotFound        => File.OpenError.FileNotFound,
+            Node.OpenFileError.Canceled                 => @panic("TODO"),
         };
     };
 
@@ -628,6 +634,7 @@ fn dirRead(userdata: ?*anyopaque, dr: *Dir.Reader, buffer: []Dir.Entry) Dir.Read
     if (dr.state == .reset) {
         node.resetDir(dr.dir.handle) catch |e| switch (e) {
             error.InvalidHandle => return Dir.Reader.Error.AccessDenied,
+            error.Canceled => @panic("TODO"),
         };
         dr.state = .reading;
     }
@@ -636,6 +643,7 @@ fn dirRead(userdata: ?*anyopaque, dr: *Dir.Reader, buffer: []Dir.Entry) Dir.Read
     while (count < buffer.len) {
         const entry = node.readDir(dr.dir.handle) catch |e| switch (e) {
             error.InvalidHandle => return Dir.Reader.Error.AccessDenied,
+            error.Canceled => @panic("TODO"),
             error.NoMoreItems => {
                 dr.state = .finished;
                 return count;
@@ -686,6 +694,7 @@ fn dirDeleteFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8) Dir.Dele
             Node.DeleteFileError.ComponentNotFound => Dir.DeleteFileError.FileNotFound,
             Node.DeleteFileError.NotFound => Dir.DeleteFileError.FileNotFound,
             Node.DeleteFileError.IsDirectory => Dir.DeleteFileError.IsDir,
+            Node.DeleteFileError.Canceled => @panic("TODO"),
         };
     };
 }
@@ -706,6 +715,7 @@ fn dirDeleteDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8) Dir.Delet
             Node.DeleteDirError.NotFound               => Dir.DeleteDirError.FileNotFound,
             Node.DeleteDirError.NotDirectory           => Dir.DeleteDirError.NotDir,
             Node.DeleteDirError.DirNotEmpty            => Dir.DeleteDirError.DirNotEmpty,
+            Node.DeleteDirError.Canceled               => @panic("TODO"),
         };
     };
 }
@@ -807,6 +817,7 @@ fn fileLength(userdata: ?*anyopaque, file: File) File.LengthError!u64 {
     const node: *Node = @ptrCast(@alignCast(userdata.?));
     return node.fileSize(file.handle) catch |e| switch (e) {
         error.InvalidHandle => File.LengthError.Streaming,
+        error.Canceled => @panic("TODO"),
     };
 }
 
@@ -833,6 +844,7 @@ fn fileWritePositional(
         const written = node.writeFile(file.handle, cursor, header, &.{}) catch |err| switch (err) {
             error.InvalidHandle => return File.WritePositionalError.NotOpenForWriting,
             error.OutOfMemory => return File.WritePositionalError.SystemResources,
+            error.Canceled => @panic("TODO"),
         };
         cursor = std.math.add(usize, cursor, written) catch return File.WritePositionalError.FileTooBig;
         copied += written;
@@ -845,6 +857,7 @@ fn fileWritePositional(
             const written = node.writeFile(file.handle, cursor, bytes, &.{}) catch |err| switch (err) {
                 error.InvalidHandle => return File.WritePositionalError.NotOpenForWriting,
                 error.OutOfMemory => return File.WritePositionalError.SystemResources,
+                error.Canceled => @panic("TODO"),
             };
             cursor = std.math.add(usize, cursor, written) catch return File.WritePositionalError.FileTooBig;
             copied += written;
@@ -857,6 +870,7 @@ fn fileWritePositional(
             const written = node.writeFile(file.handle, cursor, pattern, &.{}) catch |err| switch (err) {
                 error.InvalidHandle => return File.WritePositionalError.NotOpenForWriting,
                 error.OutOfMemory => return File.WritePositionalError.SystemResources,
+                error.Canceled => @panic("TODO"),
             };
             cursor = std.math.add(usize, cursor, written) catch return File.WritePositionalError.FileTooBig;
             copied += written;
@@ -893,6 +907,7 @@ fn fileReadPositional(userdata: ?*anyopaque, file: File, data: []const []u8, off
         const bytes_read = node.readFile(file.handle, @intCast(offset + copied), buffer) catch |e| {
             return switch (e) {
                 error.InvalidHandle => File.ReadPositionalError.NotOpenForReading,
+                error.Canceled => @panic("TODO"),
             };
         };
         copied += bytes_read;
@@ -907,6 +922,7 @@ fn fileSeekBy(userdata: ?*anyopaque, file: File, offset: i64) File.SeekError!voi
     node.seekFileBy(file.handle, offset) catch |err| switch (err) {
         error.InvalidHandle => return File.SeekError.AccessDenied,
         error.NegativeOffset, error.Overflow => return File.SeekError.Unseekable,
+        error.Canceled => @panic("TODO"),
     };
 }
 
@@ -916,6 +932,7 @@ fn fileSeekTo(userdata: ?*anyopaque, file: File, offset: u64) File.SeekError!voi
     node.seekFileTo(file.handle, offset_usize) catch |err| switch (err) {
         error.InvalidHandle => return File.SeekError.AccessDenied,
         error.NegativeOffset, error.Overflow => return File.SeekError.Unseekable,
+        error.Canceled => @panic("TODO"),
     };
 }
 
@@ -1167,7 +1184,7 @@ fn sleep(userdata: ?*anyopaque, timeout: Timeout) Cancelable!void {
     if (delta_us == 0)
         return;
 
-    node.sleep(delta_us);
+    try node.sleep(delta_us);
 }
 
 fn random(userdata: ?*anyopaque, buffer: []u8) void {
@@ -1219,6 +1236,7 @@ fn netListenIp(userdata: ?*anyopaque, address: *const net.IpAddress, options: ne
         error.AddressNotAvailable => return error.AddressUnavailable,
         error.AddressAlreadyUsed => return error.AddressInUse,
         error.OutOfMemory => return error.SystemResources,
+        error.Canceled => @panic("TODO"),
     };
 
     return .{
@@ -1236,6 +1254,7 @@ fn netAccept(userdata: ?*anyopaque, listen_handle: net.Socket.Handle, options: n
         error.InvalidHandle => return error.SocketNotListening,
         error.AcceptQueueEmpty => return error.WouldBlock,
         error.OutOfMemory => return error.SystemResources,
+        error.Canceled => @panic("TODO"),
     };
 
     return .{
@@ -1267,6 +1286,7 @@ fn netConnectIp(userdata: ?*anyopaque, address: *const net.IpAddress, options: n
         error.UnavailableHost => return error.HostUnreachable,
         error.PeerNotListeningOnAddress => return error.ConnectionRefused,
         error.OutOfMemory => return error.SystemResources,
+        error.Canceled => @panic("TODO"),
     };
 
     return .{
@@ -1304,6 +1324,7 @@ fn netSend(userdata: ?*anyopaque, handle: net.Socket.Handle, messages: []net.Out
             error.InvalidHandle => return .{ error.SocketUnconnected, index },
             error.NotConnected => return .{ error.SocketUnconnected, index },
             error.OutOfMemory => return .{ error.SystemResources, index },
+            error.Canceled => @panic("TODO"),
         };
         message.data_len = written;
     }
@@ -1323,6 +1344,7 @@ fn netRead(userdata: ?*anyopaque, fd: net.Socket.Handle, data: [][]u8) net.Strea
         const block = (copied == 0);
         const n = node.readSocket(fd, buffer, block) catch |e| switch (e) {
             error.InvalidHandle => return error.SocketUnconnected,
+            error.Canceled => @panic("TODO"),
         };
         if (n == 0)
             break;
@@ -1345,6 +1367,7 @@ fn netWrite(userdata: ?*anyopaque, handle: net.Socket.Handle, header: []const u8
             error.InvalidHandle => return error.SocketUnconnected,
             error.NotConnected => return error.SocketUnconnected,
             error.OutOfMemory => return error.SystemResources,
+            error.Canceled => @panic("TODO"),
         };
 
     if (data.len != 0) {
@@ -1355,6 +1378,7 @@ fn netWrite(userdata: ?*anyopaque, handle: net.Socket.Handle, header: []const u8
                 error.InvalidHandle => return error.SocketUnconnected,
                 error.NotConnected => return error.SocketUnconnected,
                 error.OutOfMemory => return error.SystemResources,
+                error.Canceled => @panic("TODO"),
             };
         }
 
@@ -1366,6 +1390,7 @@ fn netWrite(userdata: ?*anyopaque, handle: net.Socket.Handle, header: []const u8
                 error.InvalidHandle => return error.SocketUnconnected,
                 error.NotConnected => return error.SocketUnconnected,
                 error.OutOfMemory => return error.SystemResources,
+                error.Canceled => @panic("TODO"),
             };
         }
     }
@@ -1396,6 +1421,7 @@ fn netShutdown(userdata: ?*anyopaque, handle: net.Socket.Handle, how: net.Shutdo
 
     node.closeSocket(handle) catch |err| switch (err) {
         error.InvalidHandle => return error.SocketUnconnected,
+        error.Canceled => @panic("TODO"),
     };
 }
 
