@@ -412,19 +412,19 @@ fn groupCancel(userdata: ?*anyopaque, type_erased: *Group, initial_token: *anyop
 }
 
 fn recancel(userdata: ?*anyopaque) void {
-    _ = userdata;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.recancel();
 }
 
 fn swapCancelProtection(userdata: ?*anyopaque, new: CancelProtection) CancelProtection {
     _ = userdata;
     _ = new;
-    @panic("Not implemented yet");
+    @panic("TODO");
 }
 
 fn checkCancel(userdata: ?*anyopaque) Cancelable!void {
-    _ = userdata;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    try node.checkCancel();
 }
 
 fn futexWait(userdata: ?*anyopaque, ptr: *const u32, expected: u32, timeout: Timeout) Cancelable!void {
