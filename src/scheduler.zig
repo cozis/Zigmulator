@@ -391,3 +391,17 @@ pub fn cancel(self: *Scheduler, id: TaskID) !void {
 
     child.cancel = true;
 }
+
+pub fn checkCancel(self: *Scheduler) !void {
+    const task = self.findTaskByID(self.current_id.?).?;
+    if (!task.cancel)
+        return;
+
+    task.cancel = false;
+    return error.Canceled;
+}
+
+pub fn recancel(self: *Scheduler) void {
+    const task = self.findTaskByID(self.current_id.?).?;
+    task.cancel = true;
+}
