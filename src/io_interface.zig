@@ -390,12 +390,12 @@ fn checkCancel(userdata: ?*anyopaque) Cancelable!void {
 fn futexWait(userdata: ?*anyopaque, ptr: *const u32, expected: u32, timeout: Timeout) Cancelable!void {
     _ = timeout;
     const node: *Node = @ptrCast(@alignCast(userdata.?));
-    node.futexWait(ptr, expected);
+    try node.futexWait(ptr, expected);
 }
 
 fn futexWaitUncancelable(userdata: ?*anyopaque, ptr: *const u32, expected: u32) void {
     const node: *Node = @ptrCast(@alignCast(userdata.?));
-    node.futexWait(ptr, expected);
+    node.futexWaitUncancelable(ptr, expected);
 }
 
 fn futexWake(userdata: ?*anyopaque, ptr: *const u32, max_waiters: u32) void {
