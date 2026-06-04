@@ -335,7 +335,7 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
             return c.id;
         }
 
-        const task = self.findTaskByID(self.current_id.?);
+        const task = self.findTaskByID(self.current_id.?).?;
         task.state = .blocked;
         task.wakeup_time = null;
         task.wakeup_tasks = ids;
