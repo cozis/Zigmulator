@@ -977,9 +977,11 @@ fn fileSeekTo(userdata: ?*anyopaque, file: File, offset: u64) File.SeekError!voi
 }
 
 fn fileSync(userdata: ?*anyopaque, file: File) File.SyncError!void {
-    _ = userdata;
-    _ = file;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.syncFile(file.handle) catch |err| switch (err) {
+        error.InvalidHandle => return error.AccessDenied,
+        error.Canceled => return error.Canceled,
+    };
 }
 
 fn fileIsTty(userdata: ?*anyopaque, file: File) Cancelable!bool {
