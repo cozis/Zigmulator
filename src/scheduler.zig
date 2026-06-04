@@ -326,7 +326,13 @@ pub fn sleep(self: *Scheduler, delta_us: u64) !void {
     try self.checkCancel();
 }
 
-pub fn futexWait(self: *Scheduler, ptr: *const u32, expected: u32) void {
+pub fn futexWait(self: *Scheduler, ptr: *const u32, expected: u32) !void {
+    try self.checkCancel();
+    self.futexWaitUncancelable(ptr, expected);
+    try self.checkCancel();
+}
+
+pub fn futexWaitUncancelable(self: *Scheduler, ptr: *const u32, expected: u32) void {
     if (@atomicLoad(u32, ptr, .seq_cst) != expected)
         return;
 
