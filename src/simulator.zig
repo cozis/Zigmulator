@@ -7,7 +7,7 @@ const Scheduler = @import("scheduler.zig");
 const Network   = @import("network.zig");
 const Node      = @import("node.zig");
 
-pub const EntryPoint = Scheduler.EntryPoint;
+pub const EntryPoint = Scheduler.MainEntryPoint;
 
 const SpawnOptions = struct {
     stack_size: usize = 64 * 1024,
