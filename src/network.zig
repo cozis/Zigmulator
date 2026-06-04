@@ -57,6 +57,7 @@ pub const ConnSocket = struct {
     peer_conn  : ?*ConnSocket,
 
     input_buffer: std.ArrayList(u8),
+    pending_output_buffer: std.ArrayList(u8),
 };
 
 pub const Host = struct {
@@ -169,14 +170,17 @@ pub const Host = struct {
         self.linkConnSocket(new_socket);
         errdefer self.unlinkConnSocket(new_socket);
 
+        // Initialize other fields
+        new_socket.peer_listen = null;
+        new_socket.input_buffer = .empty;
+        new_socket.pending_output_buffer = .empty;
+        try new_socket.input_buffer.appendSlice(self.gpa, peer_socket.pending_output_buffer.items);
+        peer_socket.pending_output_buffer.clearRetainingCapacity();
+
         // Link the bound sockets and remove the reference to the listener
         new_socket.peer_conn = peer_socket;
         peer_socket.peer_conn = new_socket;
         peer_socket.peer_listen = null;
-
-        // Initialize other fields
-        new_socket.peer_listen = null;
-        new_socket.input_buffer = .empty;
     }
 
     fn findListenSocket(self: *Host, address: Address) ?*ListenSocket {
@@ -201,6 +205,7 @@ pub const Host = struct {
         new_socket.peer_listen = listen_socket;
         new_socket.peer_conn = null;
         new_socket.input_buffer = .empty;
+        new_socket.pending_output_buffer = .empty;
 
         // Add socket to the peer's accept queue
         //
@@ -225,6 +230,7 @@ pub const Host = struct {
 
         self.unlinkConnSocket(socket);
         socket.input_buffer.deinit(self.gpa);
+        socket.pending_output_buffer.deinit(self.gpa);
     }
 
     pub fn closeListenSocket(self: *Host, socket: *ListenSocket) void {
@@ -238,8 +244,15 @@ pub const Host = struct {
     }
 
     pub fn send(_: *Host, socket: *ConnSocket, source: []const u8) SendError!usize {
-        const peer_conn = socket.peer_conn orelse return SendError.NotConnected;
-        try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, source);
+        if (socket.peer_conn) |peer_conn| {
+            if (socket.pending_output_buffer.items.len > 0) {
+                try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, socket.pending_output_buffer.items);
+                socket.pending_output_buffer.clearRetainingCapacity();
+            }
+            try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, source);
+        } else {
+            try socket.pending_output_buffer.appendSlice(socket.host.gpa, source);
+        }
         return source.len;
     }
 
