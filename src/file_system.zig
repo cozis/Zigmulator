@@ -467,6 +467,12 @@ pub fn seekFileBy(self: *FileSystem, open_file: *OpenFile, offset: i64) SeekErro
     }
 }
 
+pub fn syncFile(self: *FileSystem, open_file: *OpenFile) void {
+    _ = self;
+    _ = open_file;
+    // TODO
+}
+
 fn dumpEntity(entity: *Entity, depth: u32) void {
     if (entity.is_dir) {
         for (entity.children.items) |item| {
