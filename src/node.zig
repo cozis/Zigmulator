@@ -151,6 +151,14 @@ pub fn cancel(self: *Node, id: TaskID) !void {
     try self.scheduler.cancel(id);
 }
 
+pub fn checkCancel(self: *Node) !void {
+    try self.scheduler.checkCancel();
+}
+
+pub fn recancel(self: *Node) void {
+    self.scheduler.recancel();
+}
+
 pub fn wait(self: *Node, ids: []const TaskID) !TaskID {
     return self.scheduler.wait(ids);
 }
