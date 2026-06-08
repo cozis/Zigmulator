@@ -5,3 +5,4 @@ zig-out
 ignored
 main
 mock_fs_dump
+*.log
