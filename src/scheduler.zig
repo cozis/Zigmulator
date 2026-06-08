@@ -1,9 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Node = @import("node.zig");
-const trace = @import("trace.zig");
-const Trace = trace.Trace;
-const TraceTaskState = trace.TraceTaskState;
+const Trace = @import("trace.zig").Trace;
 
 const Scheduler = @This();
 
@@ -98,7 +96,7 @@ pub fn deinit(self: *Scheduler) void {
     self.tasks.deinit(self.gpa);
 }
 
-fn traceTaskState(self: *Scheduler, task: *const Task, state: TraceTaskState, reason: []const u8) void {
+fn traceTaskState(self: *Scheduler, task: *const Task, state: Trace.TaskState, reason: []const u8) void {
     self.trace.taskState(task.id, task.node, state, reason);
 }
 

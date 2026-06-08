@@ -36,7 +36,7 @@ real_io: std.Io,
 
 pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.gpa = gpa;
-    self.trace.init();
+    self.trace.init(real_io);
     self.prng = std.Random.DefaultPrng.init(seed);
     self.scheduler.init(gpa, &self.trace, &self.prng);
     self.network.init(gpa);
