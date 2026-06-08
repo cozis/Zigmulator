@@ -36,6 +36,12 @@ pub const Trace = struct {
         _ = node;
     }
 
+    pub fn timeAdvanced(self: *Trace, from: u64, to: u64) void {
+        _ = self;
+        _ = from;
+        _ = to;
+    }
+
     pub fn beginIO(self: *Trace, disk: bool, source: std.builtin.SourceLocation) PendingTrace {
         _ = self;
         _ = disk;
