@@ -163,12 +163,35 @@ pub fn despawnNested(self: *Scheduler, id: TaskID) void {
     _ = self.tasks.orderedRemove(index);
 }
 
-fn findTaskWithState(self: *Scheduler, state: State) ?*Task {
+fn countTasksWithState(self: *Scheduler, state: State) usize {
+    var count: usize = 0;
     for (self.tasks.items) |*task| {
         if (task.state == state)
+            count += 1;
+    }
+    return count;
+}
+
+fn findNthTaskWithState(self: *Scheduler, state: State, index: usize) ?*Task {
+    var remaining = index;
+    for (self.tasks.items) |*task| {
+        if (task.state != state)
+            continue;
+        if (remaining == 0)
             return task;
+        remaining -= 1;
     }
     return null;
+}
+
+fn pickReadyTask(self: *Scheduler) ?*Task {
+    const ready_count = self.countTasksWithState(.ready);
+    if (ready_count == 0)
+        return null;
+
+    const random = self.prng.random();
+    const index = random.uintLessThan(usize, ready_count);
+    return self.findNthTaskWithState(.ready, index).?;
 }
 
 fn findTaskIndexByID(self: *Scheduler, id: TaskID) ?usize {
@@ -234,7 +257,7 @@ fn advanceTimeAndPickTask(self: *Scheduler) ?*Task {
 }
 
 pub fn scheduleOne(self: *Scheduler) bool {
-    const task = self.findTaskWithState(.ready) orelse self.advanceTimeAndPickTask() orelse return false;
+    const task = self.pickReadyTask() orelse self.advanceTimeAndPickTask() orelse return false;
     const id = task.id;
     self.current_id = id;
     task.state = .running;
