@@ -1,4 +1,6 @@
 const std = @import("std");
+const Node = @import("node.zig");
+const TaskID = @import("scheduler.zig").TaskID;
 
 const PendingTrace = struct {};
 
@@ -8,6 +10,16 @@ pub const Trace = struct {
     }
 
     pub fn deinit(self: *Trace) void {
+        _ = self;
+    }
+
+    pub fn enterTask(self: *Trace, task_id: TaskID, node: *Node) void {
+        _ = self;
+        _ = task_id;
+        _ = node;
+    }
+
+    pub fn leaveTask(self: *Trace) void {
         _ = self;
     }
 
