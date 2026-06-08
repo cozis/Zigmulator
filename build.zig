@@ -143,4 +143,41 @@ pub fn build(b: *std.Build) void {
     const run_tcp_ping_pong_cmd = b.addRunArtifact(tcp_ping_pong_exe);
     const tcp_ping_pong_step = b.step("tcp_ping_pong", "Run the TCP ping-pong example");
     tcp_ping_pong_step.dependOn(&run_tcp_ping_pong_cmd.step);
+
+    const diagram_step = b.step("diagram", "Build the diagram generator");
+
+    const diagram_exe = b.addExecutable(.{
+        .name = "diagram",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("diagram/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const install_diagram_exe = b.addInstallArtifact(diagram_exe, .{});
+    diagram_step.dependOn(&install_diagram_exe.step);
+
+    const run_timeline_html_cmd = b.addRunArtifact(diagram_exe);
+    run_timeline_html_cmd.addArg("timeline_html");
+    if (b.args) |args| {
+        run_timeline_html_cmd.addArgs(args);
+    }
+    const run_timeline_html_step = b.step("timeline_html", "Generate a timeline diagram as HTML");
+    run_timeline_html_step.dependOn(&run_timeline_html_cmd.step);
+
+    const run_timeline_ascii_cmd = b.addRunArtifact(diagram_exe);
+    run_timeline_ascii_cmd.addArg("timeline_ascii");
+    if (b.args) |args| {
+        run_timeline_ascii_cmd.addArgs(args);
+    }
+    const run_timeline_ascii_step = b.step("timeline_ascii", "Generate a timeline diagram as ASCII");
+    run_timeline_ascii_step.dependOn(&run_timeline_ascii_cmd.step);
+
+    const run_strace_cmd = b.addRunArtifact(diagram_exe);
+    run_strace_cmd.addArg("strace");
+    if (b.args) |args| {
+        run_strace_cmd.addArgs(args);
+    }
+    const run_strace_step = b.step("strace", "Generate a trace of all I/O calls");
+    run_strace_step.dependOn(&run_strace_cmd.step);
 }
