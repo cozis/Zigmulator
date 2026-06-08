@@ -65,6 +65,7 @@ const Descriptor = struct {
 gpa: Allocator,
 trace: *Trace,
 prng: *std.Random.DefaultPrng,
+id: u32,
 local_time: u64,
 arena: std.heap.ArenaAllocator,
 argv: [][*:0]const u8,
@@ -114,10 +115,11 @@ fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error!
     return result;
 }
 
-pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
+pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, node_id: u32, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
     self.gpa = gpa;
     self.trace = trace;
     self.prng = prng;
+    self.id = node_id;
     self.local_time = 0;
     self.arena = .init(gpa);
     self.scheduler = scheduler;

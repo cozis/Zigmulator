@@ -33,16 +33,18 @@ network: Network,
 nodes: std.ArrayList(*Node),
 executables: std.ArrayList(ExecutableName),
 real_io: std.Io,
+next_node_id: u32,
 
 pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.gpa = gpa;
-    self.trace.init(real_io);
+    self.trace.init(&self.scheduler, real_io);
     self.prng = std.Random.DefaultPrng.init(seed);
     self.scheduler.init(gpa, &self.trace, &self.prng);
     self.network.init(gpa);
     self.nodes = .empty;
     self.executables = .empty;
     self.real_io = real_io;
+    self.next_node_id = 0;
 }
 
 pub fn deinit(self: *Simulator) void {
@@ -72,10 +74,13 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     const name = extractProgramNameFromCommand(command) orelse return SpawnError.InvalidCommand;
     const entry = self.getExecutableEntryPoint(name) orelse return SpawnError.NoSuchProgram;
 
+    const node_id = self.next_node_id;
+    self.next_node_id += 1;
+
     const node = try self.gpa.create(Node);
     errdefer self.gpa.destroy(node);
 
-    try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, command, options.addresses, self.gpa);
+    try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, node_id, command, options.addresses, self.gpa);
 
     try self.nodes.append(self.gpa, node);
     errdefer _ = self.nodes.swapRemove(self.nodes.items.len-1);
