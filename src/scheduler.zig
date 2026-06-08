@@ -70,14 +70,16 @@ const Task = struct {
 };
 
 gpa: Allocator,
+prng: *std.Random.DefaultPrng,
 tasks: std.ArrayList(Task),
 regs: Registers,
 current_id: ?TaskID,
 current_time: u64,
 next_task_id: u64,
 
-pub fn init(self: *Scheduler, gpa: Allocator) void {
+pub fn init(self: *Scheduler, gpa: Allocator, prng: *std.Random.DefaultPrng) void {
     self.gpa = gpa;
+    self.prng = prng;
     self.tasks = .empty;
     self.current_id = null;
     self.current_time = 0;

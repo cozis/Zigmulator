@@ -25,15 +25,17 @@ const ExecutableName = struct {
 };
 
 gpa: Allocator,
+prng: std.Random.DefaultPrng,
 scheduler: Scheduler,
 network: Network,
 nodes: std.ArrayList(*Node),
 executables: std.ArrayList(ExecutableName),
 real_io: std.Io,
 
-pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io) void {
+pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.gpa = gpa;
-    self.scheduler.init(gpa);
+    self.prng = std.Random.DefaultPrng.init(seed);
+    self.scheduler.init(gpa, &self.prng);
     self.network.init(gpa);
     self.nodes = .empty;
     self.executables = .empty;

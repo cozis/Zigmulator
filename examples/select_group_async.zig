@@ -26,7 +26,7 @@ fn program(init: std.process.Init) anyerror!void {
 
 pub fn main(init: std.process.Init) !void {
     var sim: Simulator = undefined;
-    sim.init(std.heap.page_allocator, init.io);
+    sim.init(std.heap.page_allocator, init.io, 0);
     defer sim.deinit();
 
     try sim.addExecutable("select_group_async", program);

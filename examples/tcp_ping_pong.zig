@@ -63,7 +63,7 @@ pub fn main(init: std.process.Init) !void {
     const server_addresses = [_]u32{std.mem.readInt(u32, &server_ip.bytes, .big)};
 
     var sim: Simulator = undefined;
-    sim.init(std.heap.page_allocator, init.io);
+    sim.init(std.heap.page_allocator, init.io, 0);
     defer sim.deinit();
 
     try sim.addExecutable("server", serverProgram);
