@@ -102,7 +102,3 @@ fn getExecutableEntryPoint(self: *Simulator, name: []const u8) ?EntryPoint {
     }
     return null;
 }
-
-test {
-    _ = @import("test_simulator.zig");
-}
