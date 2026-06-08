@@ -151,7 +151,9 @@ fn spawnInner(
     };
 
     try self.tasks.append(self.gpa, task);
-    return &self.tasks.items[self.tasks.items.len - 1];
+    const appended = &self.tasks.items[self.tasks.items.len - 1];
+    self.trace.taskSpawned(appended.id, appended.node, appended.parent_id);
+    return appended;
 }
 
 // Removes from the scheduler a nested task. This should only be used
@@ -162,6 +164,7 @@ pub fn despawnNested(self: *Scheduler, id: TaskID) void {
     const index = self.findTaskIndexByID(id) orelse return;
     const task = &self.tasks.items[index];
 
+    self.trace.taskRemoved(task.id, task.node);
     std.heap.page_allocator.free(task.stack);
     _ = self.tasks.orderedRemove(index);
 }
