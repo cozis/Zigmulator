@@ -72,3 +72,9 @@ Since Zigmulator mocks the entire world, the main limitation is in how much of i
 ## Current Status
 
 Currently Zigmulator is a proof of concept. A basic version of network, disk, scheduling have been implemented and only the write operations have been mocked.
+
+## Visualization
+
+You can also use the simulation trace to create visualizations of what your program is doing
+
+![timeline image](timeline.png)
