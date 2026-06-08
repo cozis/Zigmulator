@@ -1,7 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Node = @import("node.zig");
-const Trace = @import("trace.zig").Trace;
+const trace = @import("trace.zig");
+const Trace = trace.Trace;
+const TraceTaskState = trace.TraceTaskState;
 
 const Scheduler = @This();
 
@@ -96,6 +98,10 @@ pub fn deinit(self: *Scheduler) void {
     self.tasks.deinit(self.gpa);
 }
 
+fn traceTaskState(self: *Scheduler, task: *const Task, state: TraceTaskState, reason: []const u8) void {
+    self.trace.taskState(task.id, task.node, state, reason);
+}
+
 pub fn spawn(self: *Scheduler, node: *Node, entry: MainEntryPoint, stack_size: usize) !void {
     _ = try self.spawnInner(node, .{ .main = entry }, stack_size, null, null);
 }
@@ -153,6 +159,7 @@ fn spawnInner(
     try self.tasks.append(self.gpa, task);
     const appended = &self.tasks.items[self.tasks.items.len - 1];
     self.trace.taskSpawned(appended.id, appended.node, appended.parent_id);
+    self.traceTaskState(appended, .ready, "spawned");
     return appended;
 }
 
@@ -240,6 +247,7 @@ fn advanceTimeAndUnblockTasks(self: *Scheduler, new_time: u64) void {
                     task.wakeup_time = null;
                     task.wakeup_tasks = null;
                     task.wakeup_futex = null;
+                    self.traceTaskState(task, .ready, "sleep elapsed");
                 }
             }
         }
@@ -269,6 +277,7 @@ pub fn scheduleOne(self: *Scheduler) bool {
     const id = task.id;
     self.current_id = id;
     task.state = .running;
+    self.traceTaskState(task, .running, "scheduled");
     contextSwitch(&self.regs, &task.regs);
     self.trace.leaveTask();
     const current = self.findTaskByID(id) orelse return true;
@@ -333,6 +342,7 @@ fn taskStart(self: *Scheduler) callconv(.c) noreturn {
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
     current.node.local_time += TASK_RUN_COST_US;
+    self.traceTaskState(current, if (failed) .failed else .returned, "task completed");
     if (current.parent_id) |parent_id| {
         if (self.findTaskByID(parent_id)) |parent| {
             if (taskIsWaitingFor(parent, current.id)) {
@@ -340,6 +350,7 @@ fn taskStart(self: *Scheduler) callconv(.c) noreturn {
                 parent.wakeup_time = null;
                 parent.wakeup_tasks = null;
                 parent.wakeup_futex = null;
+                self.traceTaskState(parent, .ready, "child completed");
             }
         }
     }
@@ -361,6 +372,7 @@ pub fn sleep(self: *Scheduler, delta_us: u64) !void {
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
     current.node.local_time += TASK_RUN_COST_US;
+    self.traceTaskState(current, .sleeping, "sleep");
     contextSwitch(&current.regs, &self.regs);
     const resumed = self.findTaskByID(id).?;
     self.trace.enterTask(resumed.id, resumed.node);
@@ -384,6 +396,7 @@ pub fn futexWaitUncancelable(self: *Scheduler, ptr: *const u32, expected: u32) v
     current.wakeup_tasks = null;
     current.wakeup_futex = ptr;
     current.node.local_time += TASK_RUN_COST_US;
+    self.traceTaskState(current, .waiting_futex, "futex wait");
     contextSwitch(&current.regs, &self.regs);
     const resumed = self.findTaskByID(id).?;
     self.trace.enterTask(resumed.id, resumed.node);
@@ -399,6 +412,7 @@ pub fn futexWake(self: *Scheduler, ptr: *const u32, max_waiters: u32) void {
             task.wakeup_time = null;
             task.wakeup_tasks = null;
             task.wakeup_futex = null;
+            self.traceTaskState(task, .ready, "futex wake");
             woken += 1;
         }
     }
@@ -431,6 +445,7 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.wakeup_tasks = ids;
         task.wakeup_futex = null;
         task.node.local_time += TASK_RUN_COST_US;
+        self.traceTaskState(task, .waiting_task, "wait");
         contextSwitch(&task.regs, &self.regs);
         const resumed = self.findTaskByID(id).?;
         self.trace.enterTask(resumed.id, resumed.node);
@@ -447,6 +462,7 @@ pub fn cancel(self: *Scheduler, id: TaskID) void {
         child.wakeup_time = null;
         child.wakeup_tasks = null;
         child.wakeup_futex = null;
+        self.traceTaskState(child, .ready, "cancel");
     }
 }
 
