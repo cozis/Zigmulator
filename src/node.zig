@@ -266,17 +266,33 @@ fn descToHandle(self: *Node, desc: *Descriptor) Handle {
 pub const CloseDirError = HandleError || CancelError;
 
 pub fn closeDir(self: *Node, handle: Handle) CloseDirError!void {
-    try self.fakeDelay(Delay.dir_close);
-    const desc = try self.handleToDescOfType(handle, .dir);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_close);
+    const desc = self.handleToDescOfType(handle, .dir) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     self.file_system.closeDir(&desc.dir, self.gpa);
     desc.kind = .unused;
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const CreateDirError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createDir(self: *Node, parent: ?Handle, path: []const u8) CreateDirError!void {
-    try self.fakeDelay(Delay.dir_create);
-    return self.file_system.createDir(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_create);
+    const parent_dir = self.handleToOpenDirOrNULL(parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.createDir(path, parent_dir, self.gpa) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const OpenDirError = error{
@@ -284,27 +300,58 @@ pub const OpenDirError = error{
 } || HandleError || FileSystem.OpenError || CancelError;
 
 pub fn openDir(self: *Node, parent: ?Handle, path: []const u8) OpenDirError!Handle {
-    try self.fakeDelay(Delay.dir_open);
-    const desc = self.unusedDesc() orelse return OpenDirError.DescriptorLimit;
-    try self.file_system.openDir(path, try self.handleToOpenDirOrNULL(parent), &desc.dir);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_open);
+    const desc = self.unusedDesc() orelse {
+        const e = OpenDirError.DescriptorLimit;
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const parent_dir = self.handleToOpenDirOrNULL(parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.openDir(path, parent_dir, &desc.dir) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     desc.kind = .dir;
-    return self.descToHandle(desc);
+    const handle = self.descToHandle(desc);
+    self.trace.completeIO(pending_trace, handle);
+    return handle;
 }
 
 pub const ResetDirError = HandleError || CancelError;
 
 pub fn resetDir(self: *Node, handle: Handle) ResetDirError!void {
-    try self.fakeDelay(Delay.dir_reset);
-    const desc = try self.handleToDescOfType(handle, .dir);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_reset);
+    const desc = self.handleToDescOfType(handle, .dir) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     self.file_system.resetDir(&desc.dir);
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const ReadDirError = HandleError || FileSystem.ReadDirError || CancelError;
 
 pub fn readDir(self: *Node, handle: Handle) ReadDirError!FileSystem.ReadDir {
-    try self.fakeDelay(Delay.dir_read);
-    const desc = try self.handleToDescOfType(handle, .dir);
-    return self.file_system.readDir(&desc.dir);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_read);
+    const desc = self.handleToDescOfType(handle, .dir) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const result = self.file_system.readDir(&desc.dir) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, result.name);
+    return result;
 }
 
 fn handleToOpenDirOrNULL(self: *Node, handle: ?Handle) HandleError!?*FileSystem.OpenDir {
@@ -316,25 +363,62 @@ fn handleToOpenDirOrNULL(self: *Node, handle: ?Handle) HandleError!?*FileSystem.
     }
 }
 
+fn fakeDelayForIo(self: *Node, pending_trace: anytype, range: DelayRange) CancelError!void {
+    self.fakeDelay(range) catch |err| {
+        self.trace.failIO(pending_trace, err);
+        return err;
+    };
+}
+
 pub const CreateFileError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createFile(self: *Node, parent: ?Handle, path: []const u8) CreateFileError!void {
-    try self.fakeDelay(Delay.file_create);
-    return self.file_system.createFile(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_create);
+    const parent_dir = self.handleToOpenDirOrNULL(parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.createFile(path, parent_dir, self.gpa) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const DeleteFileError = HandleError || FileSystem.DeleteFileError || CancelError;
 
 pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileError!void {
-    try self.fakeDelay(Delay.file_delete);
-    return self.file_system.deleteFile(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_delete);
+    const parent_dir = self.handleToOpenDirOrNULL(parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.deleteFile(path, parent_dir, self.gpa) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const DeleteDirError = HandleError || FileSystem.DeleteDirError || CancelError;
 
 pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!void {
-    try self.fakeDelay(Delay.dir_delete);
-    return self.file_system.deleteDir(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_delete);
+    const parent_dir = self.handleToOpenDirOrNULL(parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.deleteDir(path, parent_dir, self.gpa) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const OpenFileError = error{
@@ -342,51 +426,96 @@ pub const OpenFileError = error{
 } || HandleError || FileSystem.OpenError || CancelError;
 
 pub fn openFile(self: *Node, parent: ?Handle, path: []const u8) OpenFileError!Handle {
-    try self.fakeDelay(Delay.file_open);
-    const desc = self.unusedDesc() orelse return OpenFileError.DescriptorLimit;
-    try self.file_system.openFile(path, try self.handleToOpenDirOrNULL(parent), &desc.file);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_open);
+    const desc = self.unusedDesc() orelse {
+        const e = OpenFileError.DescriptorLimit;
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const parent_dir = self.handleToOpenDirOrNULL(parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.openFile(path, parent_dir, &desc.file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     desc.kind = .file;
-    return self.descToHandle(desc);
+    const handle = self.descToHandle(desc);
+    self.trace.completeIO(pending_trace, handle);
+    return handle;
 }
 
 pub const CloseFileError = HandleError || CancelError;
 
 pub fn closeFile(self: *Node, handle: Handle) CloseFileError!void {
-    try self.fakeDelay(Delay.file_close);
-    const desc = try self.handleToDescOfType(handle, .file);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_close);
+    const desc = self.handleToDescOfType(handle, .file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     self.file_system.closeFile(&desc.file, self.gpa);
     desc.kind = .unused;
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const FileSizeError = HandleError || CancelError;
 
 pub fn fileSize(self: *Node, handle: Handle) FileSizeError!u64 {
-    try self.fakeDelay(Delay.file_size);
-    const desc = try self.handleToDescOfType(handle, .file);
-    return @intCast(self.file_system.fileSize(&desc.file));
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_size);
+    const desc = self.handleToDescOfType(handle, .file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const result: u64 = @intCast(self.file_system.fileSize(&desc.file));
+    self.trace.completeIO(pending_trace, result);
+    return result;
 }
 
 pub const SyncFileError = HandleError || CancelError;
 
 pub fn syncFile(self: *Node, handle: Handle) SyncFileError!void {
-    try self.fakeDelay(Delay.file_sync);
-    const desc = try self.handleToDescOfType(handle, .file);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_sync);
+    const desc = self.handleToDescOfType(handle, .file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     self.file_system.syncFile(&desc.file);
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const ReadFileError = HandleError || CancelError;
 
 pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadFileError!usize {
-    try self.fakeDelay(Delay.file_read);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_read);
     if (handle == 0) {
         @panic("Not implemented yet"); // TODO: stdin
     } else if (handle == 1) {
-        return HandleError.InvalidHandle;
+        const e = HandleError.InvalidHandle;
+        self.trace.failIO(pending_trace, e);
+        return e;
     } else if (handle == 2) {
-        return HandleError.InvalidHandle;
+        const e = HandleError.InvalidHandle;
+        self.trace.failIO(pending_trace, e);
+        return e;
     } else {
-        const desc = try self.handleToDescOfType(handle, .file);
-        return self.file_system.readFile(&desc.file, offset, target);
+        const desc = self.handleToDescOfType(handle, .file) catch |e| {
+            self.trace.failIO(pending_trace, e);
+            return e;
+        };
+        const result = self.file_system.readFile(&desc.file, offset, target);
+        self.trace.completeIO(pending_trace, result);
+        return result;
     }
 }
 
@@ -407,10 +536,14 @@ fn writeToStderr(self: *Node, source: []const u8) void {
 pub const WriteFileError = HandleError || Allocator.Error || CancelError;
 
 pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8, source: []const []const u8) WriteFileError!usize {
-    try self.fakeDelay(Delay.file_write);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_write);
 
     if (handle == 0) {
-        return HandleError.InvalidHandle;
+        const e = HandleError.InvalidHandle;
+        self.trace.failIO(pending_trace, e);
+        return e;
     } else if (handle == 1) {
         var copied: usize = 0;
         self.writeToStdout(header);
@@ -419,6 +552,7 @@ pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8
             self.writeToStdout(item);
             copied += item.len;
         }
+        self.trace.completeIO(pending_trace, copied);
         return copied;
     } else if (handle == 2) {
         var copied: usize = 0;
@@ -428,16 +562,27 @@ pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8
             self.writeToStderr(item);
             copied += item.len;
         }
+        self.trace.completeIO(pending_trace, copied);
         return copied;
     } else {
         var copied: usize = 0;
-        const desc = try self.handleToDescOfType(handle, .file);
-        try self.file_system.writeFile(&desc.file, self.gpa, offset, header);
+        const desc = self.handleToDescOfType(handle, .file) catch |e| {
+            self.trace.failIO(pending_trace, e);
+            return e;
+        };
+        self.file_system.writeFile(&desc.file, self.gpa, offset, header) catch |e| {
+            self.trace.failIO(pending_trace, e);
+            return e;
+        };
         copied += header.len;
         for (source) |item| {
-            try self.file_system.writeFile(&desc.file, self.gpa, null, item);
+            self.file_system.writeFile(&desc.file, self.gpa, null, item) catch |e| {
+                self.trace.failIO(pending_trace, e);
+                return e;
+            };
             copied += item.len;
         }
+        self.trace.completeIO(pending_trace, copied);
         return copied;
     }
 }
@@ -445,15 +590,30 @@ pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8
 pub const SeekFileError = HandleError || FileSystem.SeekError || CancelError;
 
 pub fn seekFileTo(self: *Node, handle: Handle, offset: usize) SeekFileError!void {
-    try self.fakeDelay(Delay.file_seek);
-    const desc = try self.handleToDescOfType(handle, .file);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_seek);
+    const desc = self.handleToDescOfType(handle, .file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     self.file_system.seekFileTo(&desc.file, offset);
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub fn seekFileBy(self: *Node, handle: Handle, offset: i64) SeekFileError!void {
-    try self.fakeDelay(Delay.file_seek);
-    const desc = try self.handleToDescOfType(handle, .file);
-    try self.file_system.seekFileBy(&desc.file, offset);
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_seek);
+    const desc = self.handleToDescOfType(handle, .file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.seekFileBy(&desc.file, offset) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub const Address = Network.Address;
@@ -462,11 +622,22 @@ pub const ListenError = error{
 } || Network.ListenError || CancelError;
 
 pub fn listen(self: *Node, address: Address) ListenError!Handle {
-    try self.fakeDelay(Delay.socket_listen);
-    const desc = self.unusedDesc() orelse return ListenError.DescriptorLimit;
-    try self.network_host.listen(address, &desc.listen);
+    const pending_trace = self.trace.beginIO(false, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.socket_listen);
+    const desc = self.unusedDesc() orelse {
+        const e = ListenError.DescriptorLimit;
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.network_host.listen(address, &desc.listen) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     desc.kind = .listen;
-    return self.descToHandle(desc);
+    const handle = self.descToHandle(desc);
+    self.trace.completeIO(pending_trace, handle);
+    return handle;
 }
 
 pub const AcceptError = error{
@@ -474,17 +645,31 @@ pub const AcceptError = error{
 } || HandleError || Network.AcceptError || CancelError;
 
 pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
-    const old_desc = try self.handleToDescOfType(handle, .listen);
-    const new_desc = self.unusedDesc() orelse return AcceptError.DescriptorLimit;
+    const pending_trace = self.trace.beginIO(false, @src());
+
+    const old_desc = self.handleToDescOfType(handle, .listen) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const new_desc = self.unusedDesc() orelse {
+        const e = AcceptError.DescriptorLimit;
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
 
     while (true) {
-        try self.fakeDelay(Delay.socket_accept_poll);
-        self.network_host.accept(&old_desc.listen, &new_desc.conn) catch |err| switch (err) {
+        try self.fakeDelayForIo(pending_trace, Delay.socket_accept_poll);
+        self.network_host.accept(&old_desc.listen, &new_desc.conn) catch |e| switch (e) {
             error.AcceptQueueEmpty => continue,
-            else => return err,
+            else => {
+                self.trace.failIO(pending_trace, e);
+                return e;
+            },
         };
         new_desc.kind = .conn;
-        return self.descToHandle(new_desc);
+        const accepted_handle = self.descToHandle(new_desc);
+        self.trace.completeIO(pending_trace, accepted_handle);
+        return accepted_handle;
     }
 }
 
@@ -493,62 +678,104 @@ pub const ConnectError = error{
 } || Network.ConnectError || CancelError;
 
 pub fn connect(self: *Node, address: Address) ConnectError!Handle {
-    try self.fakeDelay(Delay.socket_connect);
-    const desc = self.unusedDesc() orelse return ConnectError.DescriptorLimit;
-    try self.network_host.connect(address, &desc.conn);
+    const pending_trace = self.trace.beginIO(false, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.socket_connect);
+    const desc = self.unusedDesc() orelse {
+        const e = ConnectError.DescriptorLimit;
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.network_host.connect(address, &desc.conn) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     desc.kind = .conn;
-    return self.descToHandle(desc);
+    const handle = self.descToHandle(desc);
+    self.trace.completeIO(pending_trace, handle);
+    return handle;
 }
 
 pub const ReadSocketError = HandleError || CancelError;
 
 pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSocketError!usize {
-    if (target.len == 0)
-        return 0;
+    const pending_trace = self.trace.beginIO(false, @src());
 
-    const desc = try self.handleToDescOfType(handle, .conn);
+    if (target.len == 0) {
+        self.trace.completeIO(pending_trace, 0);
+        return 0;
+    }
+
+    const desc = self.handleToDescOfType(handle, .conn) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
 
     if (block) {
         while (true) {
-            try self.fakeDelay(Delay.socket_read_poll);
+            try self.fakeDelayForIo(pending_trace, Delay.socket_read_poll);
 
             const num = self.network_host.read(&desc.conn, target);
 
-            if (num > 0)
+            if (num > 0) {
+                self.trace.completeIO(pending_trace, num);
                 return num;
+            }
 
             if (num == 0) {
-                if (!self.network_host.isConnected(&desc.conn))
+                if (!self.network_host.isConnected(&desc.conn)) {
+                    self.trace.completeIO(pending_trace, "eof");
                     return 0;
+                }
             }
         }
         unreachable;
     } else {
-        return self.network_host.read(&desc.conn, target);
+        const num = self.network_host.read(&desc.conn, target);
+        self.trace.completeIO(pending_trace, num);
+        return num;
     }
 }
 
 pub const WriteSocketError = HandleError || Network.SendError || CancelError;
 
 pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketError!usize {
-    try self.fakeDelay(Delay.socket_write);
-    const desc = try self.handleToDescOfType(handle, .conn);
-    return self.network_host.send(&desc.conn, source);
+    const pending_trace = self.trace.beginIO(false, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.socket_write);
+    const desc = self.handleToDescOfType(handle, .conn) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const result = self.network_host.send(&desc.conn, source) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, result);
+    return result;
 }
 
 pub const CloseSocketError = HandleError || CancelError;
 
 pub fn closeSocket(self: *Node, handle: Handle) CloseSocketError!void {
-    try self.fakeDelay(Delay.socket_close);
-    const desc = try self.handleToDesc(handle);
+    const pending_trace = self.trace.beginIO(false, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.socket_close);
+    const desc = self.handleToDesc(handle) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
     if (desc.kind == .conn) {
         self.network_host.closeConnSocket(&desc.conn);
     } else if (desc.kind == .listen) {
         self.network_host.closeListenSocket(&desc.listen);
     } else {
-        return HandleError.InvalidHandle;
+        const e = HandleError.InvalidHandle;
+        self.trace.failIO(pending_trace, e);
+        return e;
     }
     desc.kind = .unused;
+    self.trace.completeIO(pending_trace, .{});
 }
 
 pub fn dumpFiles(self: *Node) void {
