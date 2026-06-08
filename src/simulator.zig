@@ -67,7 +67,7 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     const node = try self.gpa.create(Node);
     errdefer self.gpa.destroy(node);
 
-    try node.init(self.real_io, &self.scheduler, &self.network, command, options.addresses, self.gpa);
+    try node.init(self.real_io, &self.prng, &self.scheduler, &self.network, command, options.addresses, self.gpa);
 
     try self.nodes.append(self.gpa, node);
     errdefer _ = self.nodes.swapRemove(self.nodes.items.len-1);

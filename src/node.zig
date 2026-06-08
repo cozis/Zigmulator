@@ -11,6 +11,37 @@ const MAX_DESCRIPTORS = 1 << 10;
 const Node = @This();
 const Handle = i32;
 
+const DelayRange = struct {
+    min_us: u64,
+    max_us: u64,
+};
+
+const Delay = struct {
+    const dir_close = DelayRange{ .min_us = 2, .max_us = 10 };
+    const dir_create = DelayRange{ .min_us = 20, .max_us = 80 };
+    const dir_delete = DelayRange{ .min_us = 20, .max_us = 80 };
+    const dir_open = DelayRange{ .min_us = 20, .max_us = 80 };
+    const dir_reset = DelayRange{ .min_us = 1, .max_us = 5 };
+    const dir_read = DelayRange{ .min_us = 10, .max_us = 40 };
+
+    const file_create = DelayRange{ .min_us = 20, .max_us = 100 };
+    const file_delete = DelayRange{ .min_us = 20, .max_us = 100 };
+    const file_open = DelayRange{ .min_us = 20, .max_us = 80 };
+    const file_close = DelayRange{ .min_us = 2, .max_us = 15 };
+    const file_size = DelayRange{ .min_us = 2, .max_us = 10 };
+    const file_sync = DelayRange{ .min_us = 150, .max_us = 500 };
+    const file_read = DelayRange{ .min_us = 60, .max_us = 220 };
+    const file_write = DelayRange{ .min_us = 80, .max_us = 300 };
+    const file_seek = DelayRange{ .min_us = 1, .max_us = 8 };
+
+    const socket_listen = DelayRange{ .min_us = 10, .max_us = 40 };
+    const socket_accept_poll = DelayRange{ .min_us = 10, .max_us = 40 };
+    const socket_connect = DelayRange{ .min_us = 50, .max_us = 200 };
+    const socket_read_poll = DelayRange{ .min_us = 10, .max_us = 60 };
+    const socket_write = DelayRange{ .min_us = 20, .max_us = 100 };
+    const socket_close = DelayRange{ .min_us = 5, .max_us = 30 };
+};
+
 pub const TaskID = Scheduler.TaskID;
 const NestedEntryPoint = Scheduler.NestedEntryPoint;
 
@@ -31,6 +62,7 @@ const Descriptor = struct {
 };
 
 gpa: Allocator,
+prng: *std.Random.DefaultPrng,
 local_time: u64,
 arena: std.heap.ArenaAllocator,
 argv: [][*:0]const u8,
@@ -80,8 +112,9 @@ fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error!
     return result;
 }
 
-pub fn init(self: *Node, real_io: std.Io, scheduler: *Scheduler, network: *Network, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
+pub fn init(self: *Node, real_io: std.Io, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
     self.gpa = gpa;
+    self.prng = prng;
     self.local_time = 0;
     self.arena = .init(gpa);
     self.scheduler = scheduler;
@@ -130,6 +163,16 @@ pub fn processInit(self: *Node) std.process.Init {
 
 pub fn sleep(self: *Node, delta_us: u64) !void {
     return self.scheduler.sleep(delta_us);
+}
+
+fn fakeDelay(self: *Node, range: DelayRange) !void {
+    std.debug.assert(range.min_us <= range.max_us);
+
+    const delay_us = if (range.min_us == range.max_us) range.min_us else blk: {
+        const random = self.prng.random();
+        break :blk range.min_us + random.uintLessThan(u64, range.max_us - range.min_us + 1);
+    };
+    return self.scheduler.sleep(delay_us);
 }
 
 pub fn spawn(self: *Node, entry: NestedEntryPoint, context: *const anyopaque) !TaskID {
@@ -220,7 +263,7 @@ fn descToHandle(self: *Node, desc: *Descriptor) Handle {
 pub const CloseDirError = HandleError || CancelError;
 
 pub fn closeDir(self: *Node, handle: Handle) CloseDirError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.dir_close);
     const desc = try self.handleToDescOfType(handle, .dir);
     self.file_system.closeDir(&desc.dir, self.gpa);
     desc.kind = .unused;
@@ -229,7 +272,7 @@ pub fn closeDir(self: *Node, handle: Handle) CloseDirError!void {
 pub const CreateDirError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createDir(self: *Node, parent: ?Handle, path: []const u8) CreateDirError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.dir_create);
     return self.file_system.createDir(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
@@ -238,7 +281,7 @@ pub const OpenDirError = error{
 } || HandleError || FileSystem.OpenError || CancelError;
 
 pub fn openDir(self: *Node, parent: ?Handle, path: []const u8) OpenDirError!Handle {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.dir_open);
     const desc = self.unusedDesc() orelse return OpenDirError.DescriptorLimit;
     try self.file_system.openDir(path, try self.handleToOpenDirOrNULL(parent), &desc.dir);
     desc.kind = .dir;
@@ -248,7 +291,7 @@ pub fn openDir(self: *Node, parent: ?Handle, path: []const u8) OpenDirError!Hand
 pub const ResetDirError = HandleError || CancelError;
 
 pub fn resetDir(self: *Node, handle: Handle) ResetDirError!void {
-    try self.scheduler.sleep(2);
+    try self.fakeDelay(Delay.dir_reset);
     const desc = try self.handleToDescOfType(handle, .dir);
     self.file_system.resetDir(&desc.dir);
 }
@@ -256,7 +299,7 @@ pub fn resetDir(self: *Node, handle: Handle) ResetDirError!void {
 pub const ReadDirError = HandleError || FileSystem.ReadDirError || CancelError;
 
 pub fn readDir(self: *Node, handle: Handle) ReadDirError!FileSystem.ReadDir {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.dir_read);
     const desc = try self.handleToDescOfType(handle, .dir);
     return self.file_system.readDir(&desc.dir);
 }
@@ -273,21 +316,21 @@ fn handleToOpenDirOrNULL(self: *Node, handle: ?Handle) HandleError!?*FileSystem.
 pub const CreateFileError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createFile(self: *Node, parent: ?Handle, path: []const u8) CreateFileError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.file_create);
     return self.file_system.createFile(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
 pub const DeleteFileError = HandleError || FileSystem.DeleteFileError || CancelError;
 
 pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.file_delete);
     return self.file_system.deleteFile(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
 pub const DeleteDirError = HandleError || FileSystem.DeleteDirError || CancelError;
 
 pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.dir_delete);
     return self.file_system.deleteDir(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
@@ -296,7 +339,7 @@ pub const OpenFileError = error{
 } || HandleError || FileSystem.OpenError || CancelError;
 
 pub fn openFile(self: *Node, parent: ?Handle, path: []const u8) OpenFileError!Handle {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.file_open);
     const desc = self.unusedDesc() orelse return OpenFileError.DescriptorLimit;
     try self.file_system.openFile(path, try self.handleToOpenDirOrNULL(parent), &desc.file);
     desc.kind = .file;
@@ -306,7 +349,7 @@ pub fn openFile(self: *Node, parent: ?Handle, path: []const u8) OpenFileError!Ha
 pub const CloseFileError = HandleError || CancelError;
 
 pub fn closeFile(self: *Node, handle: Handle) CloseFileError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.file_close);
     const desc = try self.handleToDescOfType(handle, .file);
     self.file_system.closeFile(&desc.file, self.gpa);
     desc.kind = .unused;
@@ -315,7 +358,7 @@ pub fn closeFile(self: *Node, handle: Handle) CloseFileError!void {
 pub const FileSizeError = HandleError || CancelError;
 
 pub fn fileSize(self: *Node, handle: Handle) FileSizeError!u64 {
-    try self.scheduler.sleep(2);
+    try self.fakeDelay(Delay.file_size);
     const desc = try self.handleToDescOfType(handle, .file);
     return @intCast(self.file_system.fileSize(&desc.file));
 }
@@ -323,7 +366,7 @@ pub fn fileSize(self: *Node, handle: Handle) FileSizeError!u64 {
 pub const SyncFileError = HandleError || CancelError;
 
 pub fn syncFile(self: *Node, handle: Handle) SyncFileError!void {
-    try self.scheduler.sleep(2);
+    try self.fakeDelay(Delay.file_sync);
     const desc = try self.handleToDescOfType(handle, .file);
     self.file_system.syncFile(&desc.file);
 }
@@ -331,7 +374,7 @@ pub fn syncFile(self: *Node, handle: Handle) SyncFileError!void {
 pub const ReadFileError = HandleError || CancelError;
 
 pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadFileError!usize {
-    try self.scheduler.sleep(100);
+    try self.fakeDelay(Delay.file_read);
     if (handle == 0) {
         @panic("Not implemented yet"); // TODO: stdin
     } else if (handle == 1) {
@@ -361,7 +404,7 @@ fn writeToStderr(self: *Node, source: []const u8) void {
 pub const WriteFileError = HandleError || Allocator.Error || CancelError;
 
 pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8, source: []const []const u8) WriteFileError!usize {
-    try self.scheduler.sleep(100);
+    try self.fakeDelay(Delay.file_write);
 
     if (handle == 0) {
         return HandleError.InvalidHandle;
@@ -399,13 +442,13 @@ pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8
 pub const SeekFileError = HandleError || FileSystem.SeekError || CancelError;
 
 pub fn seekFileTo(self: *Node, handle: Handle, offset: usize) SeekFileError!void {
-    try self.scheduler.sleep(2);
+    try self.fakeDelay(Delay.file_seek);
     const desc = try self.handleToDescOfType(handle, .file);
     self.file_system.seekFileTo(&desc.file, offset);
 }
 
 pub fn seekFileBy(self: *Node, handle: Handle, offset: i64) SeekFileError!void {
-    try self.scheduler.sleep(2);
+    try self.fakeDelay(Delay.file_seek);
     const desc = try self.handleToDescOfType(handle, .file);
     try self.file_system.seekFileBy(&desc.file, offset);
 }
@@ -416,7 +459,7 @@ pub const ListenError = error{
 } || Network.ListenError || CancelError;
 
 pub fn listen(self: *Node, address: Address) ListenError!Handle {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.socket_listen);
     const desc = self.unusedDesc() orelse return ListenError.DescriptorLimit;
     try self.network_host.listen(address, &desc.listen);
     desc.kind = .listen;
@@ -432,7 +475,7 @@ pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
     const new_desc = self.unusedDesc() orelse return AcceptError.DescriptorLimit;
 
     while (true) {
-        try self.scheduler.sleep(10);
+        try self.fakeDelay(Delay.socket_accept_poll);
         self.network_host.accept(&old_desc.listen, &new_desc.conn) catch |err| switch (err) {
             error.AcceptQueueEmpty => continue,
             else => return err,
@@ -447,7 +490,7 @@ pub const ConnectError = error{
 } || Network.ConnectError || CancelError;
 
 pub fn connect(self: *Node, address: Address) ConnectError!Handle {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.socket_connect);
     const desc = self.unusedDesc() orelse return ConnectError.DescriptorLimit;
     try self.network_host.connect(address, &desc.conn);
     desc.kind = .conn;
@@ -464,7 +507,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
 
     if (block) {
         while (true) {
-            try self.scheduler.sleep(10);
+            try self.fakeDelay(Delay.socket_read_poll);
 
             const num = self.network_host.read(&desc.conn, target);
 
@@ -485,7 +528,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
 pub const WriteSocketError = HandleError || Network.SendError || CancelError;
 
 pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketError!usize {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.socket_write);
     const desc = try self.handleToDescOfType(handle, .conn);
     return self.network_host.send(&desc.conn, source);
 }
@@ -493,7 +536,7 @@ pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketE
 pub const CloseSocketError = HandleError || CancelError;
 
 pub fn closeSocket(self: *Node, handle: Handle) CloseSocketError!void {
-    try self.scheduler.sleep(10);
+    try self.fakeDelay(Delay.socket_close);
     const desc = try self.handleToDesc(handle);
     if (desc.kind == .conn) {
         self.network_host.closeConnSocket(&desc.conn);
