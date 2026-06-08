@@ -4,6 +4,16 @@ const TaskID = @import("scheduler.zig").TaskID;
 
 const PendingTrace = struct {};
 
+pub const TraceTaskState = enum {
+    ready,
+    running,
+    sleeping,
+    waiting_futex,
+    waiting_task,
+    failed,
+    returned,
+};
+
 pub const Trace = struct {
     pub fn init(self: *Trace) void {
         _ = self;
@@ -34,6 +44,14 @@ pub const Trace = struct {
         _ = self;
         _ = task_id;
         _ = node;
+    }
+
+    pub fn taskState(self: *Trace, task_id: TaskID, node: *Node, state: TraceTaskState, reason: []const u8) void {
+        _ = self;
+        _ = task_id;
+        _ = node;
+        _ = state;
+        _ = reason;
     }
 
     pub fn timeAdvanced(self: *Trace, from: u64, to: u64) void {
