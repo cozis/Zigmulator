@@ -226,10 +226,12 @@ fn findBlockedTaskWithLowestWakeupTime(self: *Scheduler) ?*Task {
 
 fn advanceTimeAndUnblockTasks(self: *Scheduler, new_time: u64) void {
     std.debug.assert(self.current_time < new_time);
+    const old_time = self.current_time;
     self.current_time = new_time;
     for (self.tasks.items) |task| {
         task.node.local_time = @max(task.node.local_time, new_time);
     }
+    self.trace.timeAdvanced(old_time, new_time);
     for (self.tasks.items) |*task| {
         if (task.state == .blocked) {
             if (task.wakeup_time) |wakeup_time| {
