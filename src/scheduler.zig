@@ -265,6 +265,7 @@ pub fn scheduleOne(self: *Scheduler) bool {
     self.current_id = id;
     task.state = .running;
     contextSwitch(&self.regs, &task.regs);
+    self.trace.leaveTask();
     const current = self.findTaskByID(id) orelse return true;
     if (!current.stackCanaryIsIntact())
         @panic("Task stack canary was overwritten");
@@ -308,6 +309,7 @@ fn contextSwitch(old: *Registers, new: *Registers) void {
 fn taskStart(self: *Scheduler) callconv(.c) noreturn {
     const id = self.current_id.?;
     const task = self.findTaskByID(id).?;
+    self.trace.enterTask(task.id, task.node);
 
     var failed = false;
     switch (task.entry) {
@@ -348,12 +350,15 @@ fn taskReturned() callconv(.c) noreturn {
 // Called by the current task to return control to the scheduler
 pub fn sleep(self: *Scheduler, delta_us: u64) !void {
     const current = self.findTaskByID(self.current_id.?).?;
+    const id = current.id;
     current.state = .blocked;
     current.wakeup_time = self.current_time + delta_us;
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
     current.node.local_time += TASK_RUN_COST_US;
     contextSwitch(&current.regs, &self.regs);
+    const resumed = self.findTaskByID(id).?;
+    self.trace.enterTask(resumed.id, resumed.node);
     try self.checkCancel();
 }
 
@@ -368,12 +373,15 @@ pub fn futexWaitUncancelable(self: *Scheduler, ptr: *const u32, expected: u32) v
         return;
 
     const current = self.findTaskByID(self.current_id.?).?;
+    const id = current.id;
     current.state = .blocked;
     current.wakeup_time = null;
     current.wakeup_tasks = null;
     current.wakeup_futex = ptr;
     current.node.local_time += TASK_RUN_COST_US;
     contextSwitch(&current.regs, &self.regs);
+    const resumed = self.findTaskByID(id).?;
+    self.trace.enterTask(resumed.id, resumed.node);
 }
 
 pub fn futexWake(self: *Scheduler, ptr: *const u32, max_waiters: u32) void {
@@ -419,6 +427,8 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.wakeup_futex = null;
         task.node.local_time += TASK_RUN_COST_US;
         contextSwitch(&task.regs, &self.regs);
+        const resumed = self.findTaskByID(id).?;
+        self.trace.enterTask(resumed.id, resumed.node);
         try self.checkCancel();
     }
 }
