@@ -59,7 +59,7 @@ pub const Trace = struct {
         self.file.?.close(self.io);
     }
 
-    pub fn setOutputFile(self: *Trace, path: []const u8) void {
+    pub fn setOutputFile(self: *Trace, path: []const u8) !void {
         self.file = try Io.Dir.cwd().createFile(self.io, path, .{});
     }
 
