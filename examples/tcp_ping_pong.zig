@@ -66,6 +66,8 @@ pub fn main(init: std.process.Init) !void {
     sim.init(std.heap.page_allocator, init.io, 0);
     defer sim.deinit();
 
+    try sim.setTraceOutputFile("simulation.log");
+
     try sim.addExecutable("server", serverProgram);
     try sim.addExecutable("client", clientProgram);
 
