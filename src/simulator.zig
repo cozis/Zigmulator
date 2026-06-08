@@ -57,6 +57,10 @@ pub fn deinit(self: *Simulator) void {
     self.trace.deinit();
 }
 
+pub fn setTraceOutputFile(self: *Simulator, path: []const u8) !void {
+    try self.trace.setOutputFile(path);
+}
+
 pub fn addExecutable(self: *Simulator, name: []const u8, entry: EntryPoint) Allocator.Error!void {
     try self.executables.append(self.gpa, ExecutableName {
         .name = name,
