@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const FileSystem = @import("file_system.zig");
 const Network = @import("network.zig");
 const Scheduler = @import("scheduler.zig");
+const Trace = @import("trace.zig").Trace;
 const ioInterface = @import("io_interface.zig");
 
 const MAX_DESCRIPTORS = 1 << 10;
@@ -62,6 +63,7 @@ const Descriptor = struct {
 };
 
 gpa: Allocator,
+trace: *Trace,
 prng: *std.Random.DefaultPrng,
 local_time: u64,
 arena: std.heap.ArenaAllocator,
@@ -112,8 +114,9 @@ fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error!
     return result;
 }
 
-pub fn init(self: *Node, real_io: std.Io, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
+pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
     self.gpa = gpa;
+    self.trace = trace;
     self.prng = prng;
     self.local_time = 0;
     self.arena = .init(gpa);

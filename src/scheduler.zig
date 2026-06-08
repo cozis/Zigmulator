@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Node = @import("node.zig");
+const Trace = @import("trace.zig").Trace;
 
 const Scheduler = @This();
 
@@ -70,6 +71,7 @@ const Task = struct {
 };
 
 gpa: Allocator,
+trace: *Trace,
 prng: *std.Random.DefaultPrng,
 tasks: std.ArrayList(Task),
 regs: Registers,
@@ -77,8 +79,9 @@ current_id: ?TaskID,
 current_time: u64,
 next_task_id: u64,
 
-pub fn init(self: *Scheduler, gpa: Allocator, prng: *std.Random.DefaultPrng) void {
+pub fn init(self: *Scheduler, gpa: Allocator, trace: *Trace, prng: *std.Random.DefaultPrng) void {
     self.gpa = gpa;
+    self.trace = trace;
     self.prng = prng;
     self.tasks = .empty;
     self.current_id = null;

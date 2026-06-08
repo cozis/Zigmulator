@@ -3,6 +3,7 @@ const Simulator = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Trace = @import("trace.zig").Trace;
 const Scheduler = @import("scheduler.zig");
 const Network   = @import("network.zig");
 const Node      = @import("node.zig");
@@ -25,6 +26,7 @@ const ExecutableName = struct {
 };
 
 gpa: Allocator,
+trace: Trace,
 prng: std.Random.DefaultPrng,
 scheduler: Scheduler,
 network: Network,
@@ -34,8 +36,9 @@ real_io: std.Io,
 
 pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.gpa = gpa;
+    self.trace.init();
     self.prng = std.Random.DefaultPrng.init(seed);
-    self.scheduler.init(gpa, &self.prng);
+    self.scheduler.init(gpa, &self.trace, &self.prng);
     self.network.init(gpa);
     self.nodes = .empty;
     self.executables = .empty;
@@ -51,6 +54,7 @@ pub fn deinit(self: *Simulator) void {
     self.nodes.deinit(self.gpa);
     self.network.deinit();
     self.scheduler.deinit();
+    self.trace.deinit();
 }
 
 pub fn addExecutable(self: *Simulator, name: []const u8, entry: EntryPoint) Allocator.Error!void {
@@ -67,7 +71,7 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     const node = try self.gpa.create(Node);
     errdefer self.gpa.destroy(node);
 
-    try node.init(self.real_io, &self.prng, &self.scheduler, &self.network, command, options.addresses, self.gpa);
+    try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, command, options.addresses, self.gpa);
 
     try self.nodes.append(self.gpa, node);
     errdefer _ = self.nodes.swapRemove(self.nodes.items.len-1);
