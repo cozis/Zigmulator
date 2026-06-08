@@ -4,25 +4,25 @@ const Node = @import("node.zig");
 const Io = std.Io;
 const net = Io.net;
 
-const Dir               = Io.Dir;
-const File              = Io.File;
-const Group             = Io.Group;
-const AnyFuture         = Io.AnyFuture;
-const ConcurrentError   = Io.ConcurrentError;
-const CancelProtection  = Io.CancelProtection;
-const Cancelable        = Io.Cancelable;
-const Timeout           = Io.Timeout;
-const Operation         = Io.Operation;
-const Batch             = Io.Batch;
-const Terminal          = Io.Terminal;
-const LockedStderr      = Io.LockedStderr;
-const Clock             = Io.Clock;
-const Timestamp         = Io.Timestamp;
-const Duration          = Io.Duration;
+const Dir = Io.Dir;
+const File = Io.File;
+const Group = Io.Group;
+const AnyFuture = Io.AnyFuture;
+const ConcurrentError = Io.ConcurrentError;
+const CancelProtection = Io.CancelProtection;
+const Cancelable = Io.Cancelable;
+const Timeout = Io.Timeout;
+const Operation = Io.Operation;
+const Batch = Io.Batch;
+const Terminal = Io.Terminal;
+const LockedStderr = Io.LockedStderr;
+const Clock = Io.Clock;
+const Timestamp = Io.Timestamp;
+const Duration = Io.Duration;
 const RandomSecureError = Io.RandomSecureError;
-const Queue             = Io.Queue;
-const Allocator         = std.mem.Allocator;
-const TaskID            = Node.TaskID;
+const Queue = Io.Queue;
+const Allocator = std.mem.Allocator;
+const TaskID = Node.TaskID;
 
 pub fn buildIOInterfaceForNode(node: *Node) Io {
     return .{
@@ -499,16 +499,16 @@ fn dirCreateDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, permissio
 
     node.createDir(parent, sub_path) catch |e| {
         return switch (e) {
-            Node.CreateDirError.InvalidHandle          => unreachable,
-            Node.CreateDirError.ExistsAlready          => Dir.CreateDirError.PathAlreadyExists,
-            Node.CreateDirError.EmptyPath              => Dir.CreateDirError.BadPathName,
-            Node.CreateDirError.NoRootParent           => Dir.CreateDirError.FileNotFound,
-            Node.CreateDirError.TooManyComponents      => Dir.CreateDirError.NameTooLong,
-            Node.CreateDirError.ResolutionLimit        => Dir.CreateDirError.NameTooLong,
-            Node.CreateDirError.ComponentNotDirectory  => Dir.CreateDirError.NotDir,
-            Node.CreateDirError.ComponentNotFound      => Dir.CreateDirError.FileNotFound,
-            Node.CreateDirError.OutOfMemory            => Dir.CreateDirError.SystemResources,
-            Node.CreateDirError.Canceled               => return error.Canceled,
+            Node.CreateDirError.InvalidHandle => unreachable,
+            Node.CreateDirError.ExistsAlready => Dir.CreateDirError.PathAlreadyExists,
+            Node.CreateDirError.EmptyPath => Dir.CreateDirError.BadPathName,
+            Node.CreateDirError.NoRootParent => Dir.CreateDirError.FileNotFound,
+            Node.CreateDirError.TooManyComponents => Dir.CreateDirError.NameTooLong,
+            Node.CreateDirError.ResolutionLimit => Dir.CreateDirError.NameTooLong,
+            Node.CreateDirError.ComponentNotDirectory => Dir.CreateDirError.NotDir,
+            Node.CreateDirError.ComponentNotFound => Dir.CreateDirError.FileNotFound,
+            Node.CreateDirError.OutOfMemory => Dir.CreateDirError.SystemResources,
+            Node.CreateDirError.Canceled => return error.Canceled,
         };
     };
 }
@@ -538,17 +538,17 @@ fn dirOpenDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, options: Di
 
     const handle = node.openDir(parent, sub_path) catch |e| {
         return switch (e) {
-            Node.OpenDirError.InvalidHandle            => unreachable,
-            Node.OpenDirError.DescriptorLimit          => Dir.OpenError.ProcessFdQuotaExceeded,
-            Node.OpenDirError.IsDirectory              => unreachable,
-            Node.OpenDirError.NotDirectory             => Dir.OpenError.NotDir,
-            Node.OpenDirError.EmptyPath                => Dir.OpenError.BadPathName,
-            Node.OpenDirError.NoRootParent             => Dir.OpenError.FileNotFound,
-            Node.OpenDirError.TooManyComponents        => Dir.OpenError.NameTooLong,
-            Node.OpenDirError.ResolutionLimit          => Dir.OpenError.NameTooLong,
-            Node.OpenDirError.ComponentNotDirectory    => Dir.OpenError.NotDir,
-            Node.OpenDirError.ComponentNotFound        => Dir.OpenError.FileNotFound,
-            Node.OpenDirError.Canceled                 => return error.Canceled,
+            Node.OpenDirError.InvalidHandle => unreachable,
+            Node.OpenDirError.DescriptorLimit => Dir.OpenError.ProcessFdQuotaExceeded,
+            Node.OpenDirError.IsDirectory => unreachable,
+            Node.OpenDirError.NotDirectory => Dir.OpenError.NotDir,
+            Node.OpenDirError.EmptyPath => Dir.OpenError.BadPathName,
+            Node.OpenDirError.NoRootParent => Dir.OpenError.FileNotFound,
+            Node.OpenDirError.TooManyComponents => Dir.OpenError.NameTooLong,
+            Node.OpenDirError.ResolutionLimit => Dir.OpenError.NameTooLong,
+            Node.OpenDirError.ComponentNotDirectory => Dir.OpenError.NotDir,
+            Node.OpenDirError.ComponentNotFound => Dir.OpenError.FileNotFound,
+            Node.OpenDirError.Canceled => return error.Canceled,
         };
     };
 
@@ -585,32 +585,32 @@ fn dirCreateFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: D
 
     node.createFile(parent, sub_path) catch |e| {
         return switch (e) {
-            Node.CreateFileError.InvalidHandle          => unreachable,
-            Node.CreateFileError.ExistsAlready          => File.OpenError.PathAlreadyExists,
-            Node.CreateFileError.EmptyPath              => File.OpenError.BadPathName,
-            Node.CreateFileError.NoRootParent           => File.OpenError.FileNotFound,
-            Node.CreateFileError.TooManyComponents      => File.OpenError.NameTooLong,
-            Node.CreateFileError.ResolutionLimit        => File.OpenError.NameTooLong,
-            Node.CreateFileError.ComponentNotDirectory  => File.OpenError.NotDir,
-            Node.CreateFileError.ComponentNotFound      => File.OpenError.FileNotFound,
-            Node.CreateFileError.OutOfMemory            => File.OpenError.SystemResources,
-            Node.CreateFileError.Canceled               => return error.Canceled,
+            Node.CreateFileError.InvalidHandle => unreachable,
+            Node.CreateFileError.ExistsAlready => File.OpenError.PathAlreadyExists,
+            Node.CreateFileError.EmptyPath => File.OpenError.BadPathName,
+            Node.CreateFileError.NoRootParent => File.OpenError.FileNotFound,
+            Node.CreateFileError.TooManyComponents => File.OpenError.NameTooLong,
+            Node.CreateFileError.ResolutionLimit => File.OpenError.NameTooLong,
+            Node.CreateFileError.ComponentNotDirectory => File.OpenError.NotDir,
+            Node.CreateFileError.ComponentNotFound => File.OpenError.FileNotFound,
+            Node.CreateFileError.OutOfMemory => File.OpenError.SystemResources,
+            Node.CreateFileError.Canceled => return error.Canceled,
         };
     };
 
     const handle = node.openFile(parent, sub_path) catch |e| {
         return switch (e) {
-            Node.OpenFileError.InvalidHandle            => unreachable,
-            Node.OpenFileError.DescriptorLimit          => File.OpenError.ProcessFdQuotaExceeded,
-            Node.OpenFileError.IsDirectory              => File.OpenError.IsDir,
-            Node.OpenFileError.NotDirectory             => File.OpenError.NotDir,
-            Node.OpenFileError.EmptyPath                => File.OpenError.BadPathName,
-            Node.OpenFileError.NoRootParent             => File.OpenError.FileNotFound,
-            Node.OpenFileError.TooManyComponents        => File.OpenError.NameTooLong,
-            Node.OpenFileError.ResolutionLimit          => File.OpenError.NameTooLong,
-            Node.OpenFileError.ComponentNotDirectory    => File.OpenError.NotDir,
-            Node.OpenFileError.ComponentNotFound        => File.OpenError.FileNotFound,
-            Node.OpenFileError.Canceled                 => return error.Canceled,
+            Node.OpenFileError.InvalidHandle => unreachable,
+            Node.OpenFileError.DescriptorLimit => File.OpenError.ProcessFdQuotaExceeded,
+            Node.OpenFileError.IsDirectory => File.OpenError.IsDir,
+            Node.OpenFileError.NotDirectory => File.OpenError.NotDir,
+            Node.OpenFileError.EmptyPath => File.OpenError.BadPathName,
+            Node.OpenFileError.NoRootParent => File.OpenError.FileNotFound,
+            Node.OpenFileError.TooManyComponents => File.OpenError.NameTooLong,
+            Node.OpenFileError.ResolutionLimit => File.OpenError.NameTooLong,
+            Node.OpenFileError.ComponentNotDirectory => File.OpenError.NotDir,
+            Node.OpenFileError.ComponentNotFound => File.OpenError.FileNotFound,
+            Node.OpenFileError.Canceled => return error.Canceled,
         };
     };
 
@@ -636,17 +636,17 @@ fn dirOpenFile(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8, flags: Dir
 
     const handle = node.openFile(parent, sub_path) catch |e| {
         return switch (e) {
-            Node.OpenFileError.InvalidHandle            => unreachable,
-            Node.OpenFileError.DescriptorLimit          => File.OpenError.ProcessFdQuotaExceeded,
-            Node.OpenFileError.IsDirectory              => File.OpenError.IsDir,
-            Node.OpenFileError.NotDirectory             => File.OpenError.NotDir,
-            Node.OpenFileError.EmptyPath                => File.OpenError.BadPathName,
-            Node.OpenFileError.NoRootParent             => File.OpenError.FileNotFound,
-            Node.OpenFileError.TooManyComponents        => File.OpenError.NameTooLong,
-            Node.OpenFileError.ResolutionLimit          => File.OpenError.NameTooLong,
-            Node.OpenFileError.ComponentNotDirectory    => File.OpenError.NotDir,
-            Node.OpenFileError.ComponentNotFound        => File.OpenError.FileNotFound,
-            Node.OpenFileError.Canceled                 => return error.Canceled,
+            Node.OpenFileError.InvalidHandle => unreachable,
+            Node.OpenFileError.DescriptorLimit => File.OpenError.ProcessFdQuotaExceeded,
+            Node.OpenFileError.IsDirectory => File.OpenError.IsDir,
+            Node.OpenFileError.NotDirectory => File.OpenError.NotDir,
+            Node.OpenFileError.EmptyPath => File.OpenError.BadPathName,
+            Node.OpenFileError.NoRootParent => File.OpenError.FileNotFound,
+            Node.OpenFileError.TooManyComponents => File.OpenError.NameTooLong,
+            Node.OpenFileError.ResolutionLimit => File.OpenError.NameTooLong,
+            Node.OpenFileError.ComponentNotDirectory => File.OpenError.NotDir,
+            Node.OpenFileError.ComponentNotFound => File.OpenError.FileNotFound,
+            Node.OpenFileError.Canceled => return error.Canceled,
         };
     };
 
@@ -745,17 +745,17 @@ fn dirDeleteDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8) Dir.Delet
 
     node.deleteDir(parent, sub_path) catch |e| {
         return switch (e) {
-            Node.DeleteDirError.InvalidHandle          => unreachable,
-            Node.DeleteDirError.EmptyPath              => Dir.DeleteDirError.BadPathName,
-            Node.DeleteDirError.NoRootParent           => Dir.DeleteDirError.FileNotFound,
-            Node.DeleteDirError.TooManyComponents      => Dir.DeleteDirError.NameTooLong,
-            Node.DeleteDirError.ResolutionLimit        => Dir.DeleteDirError.NameTooLong,
-            Node.DeleteDirError.ComponentNotDirectory  => Dir.DeleteDirError.NotDir,
-            Node.DeleteDirError.ComponentNotFound      => Dir.DeleteDirError.FileNotFound,
-            Node.DeleteDirError.NotFound               => Dir.DeleteDirError.FileNotFound,
-            Node.DeleteDirError.NotDirectory           => Dir.DeleteDirError.NotDir,
-            Node.DeleteDirError.DirNotEmpty            => Dir.DeleteDirError.DirNotEmpty,
-            Node.DeleteDirError.Canceled               => return error.Canceled,
+            Node.DeleteDirError.InvalidHandle => unreachable,
+            Node.DeleteDirError.EmptyPath => Dir.DeleteDirError.BadPathName,
+            Node.DeleteDirError.NoRootParent => Dir.DeleteDirError.FileNotFound,
+            Node.DeleteDirError.TooManyComponents => Dir.DeleteDirError.NameTooLong,
+            Node.DeleteDirError.ResolutionLimit => Dir.DeleteDirError.NameTooLong,
+            Node.DeleteDirError.ComponentNotDirectory => Dir.DeleteDirError.NotDir,
+            Node.DeleteDirError.ComponentNotFound => Dir.DeleteDirError.FileNotFound,
+            Node.DeleteDirError.NotFound => Dir.DeleteDirError.FileNotFound,
+            Node.DeleteDirError.NotDirectory => Dir.DeleteDirError.NotDir,
+            Node.DeleteDirError.DirNotEmpty => Dir.DeleteDirError.DirNotEmpty,
+            Node.DeleteDirError.Canceled => return error.Canceled,
         };
     };
 }
@@ -868,14 +868,7 @@ fn fileClose(userdata: ?*anyopaque, files: []const File) void {
     }
 }
 
-fn fileWritePositional(
-    userdata: ?*anyopaque,
-    file    : File,
-    header  : []const u8,
-    data    : []const []const u8,
-    splat   : usize,
-    offset  : u64
-) File.WritePositionalError!usize {
+fn fileWritePositional(userdata: ?*anyopaque, file: File, header: []const u8, data: []const []const u8, splat: usize, offset: u64) File.WritePositionalError!usize {
     const node: *Node = @ptrCast(@alignCast(userdata.?));
     var cursor = std.math.cast(usize, offset) orelse return File.WritePositionalError.FileTooBig;
     var copied: usize = 0;
@@ -1201,7 +1194,7 @@ fn now(userdata: ?*anyopaque, clock: Clock) Timestamp {
     // TODO: Return an appropriate time for each clock
     _ = clock;
 
-    return .{ .nanoseconds = node.scheduler.current_time * 1000 };
+    return .{ .nanoseconds = node.local_time * 1000 };
 }
 
 fn clockResolution(userdata: ?*anyopaque, clock: Clock) Clock.ResolutionError!Duration {

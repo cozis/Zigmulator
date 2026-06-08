@@ -1,12 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const FileSystem  = @import("file_system.zig");
-const Network     = @import("network.zig");
-const Scheduler   = @import("scheduler.zig");
+const FileSystem = @import("file_system.zig");
+const Network = @import("network.zig");
+const Scheduler = @import("scheduler.zig");
 const ioInterface = @import("io_interface.zig");
 
-const MAX_DESCRIPTORS = 1<<10;
+const MAX_DESCRIPTORS = 1 << 10;
 
 const Node = @This();
 const Handle = i32;
@@ -15,7 +15,6 @@ pub const TaskID = Scheduler.TaskID;
 const NestedEntryPoint = Scheduler.NestedEntryPoint;
 
 const Descriptor = struct {
-
     const Kind = enum {
         dir,
         file,
@@ -24,14 +23,15 @@ const Descriptor = struct {
         unused,
     };
 
-    kind  : Kind = .unused,
-    dir   : FileSystem.OpenDir   = undefined,
-    file  : FileSystem.OpenFile  = undefined,
+    kind: Kind = .unused,
+    dir: FileSystem.OpenDir = undefined,
+    file: FileSystem.OpenFile = undefined,
     listen: Network.ListenSocket = undefined,
-    conn  : Network.ConnSocket   = undefined,
+    conn: Network.ConnSocket = undefined,
 };
 
 gpa: Allocator,
+local_time: u64,
 arena: std.heap.ArenaAllocator,
 argv: [][*:0]const u8,
 environ_map: std.process.Environ.Map,
@@ -52,7 +52,7 @@ fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error!
     // Count how many arguments there are
     var count: usize = 0;
     while (cursor < command.len) {
-        if (command[cursor] != ' ' and (cursor == 0 or command[cursor-1] == ' '))
+        if (command[cursor] != ' ' and (cursor == 0 or command[cursor - 1] == ' '))
             count += 1;
         cursor += 1;
     }
@@ -80,16 +80,9 @@ fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error!
     return result;
 }
 
-pub fn init(
-    self     : *Node,
-    real_io  : std.Io,
-    scheduler: *Scheduler,
-    network  : *Network,
-    command  : []const u8,
-    addresses: []const u32,
-    gpa      : Allocator
-) !void {
+pub fn init(self: *Node, real_io: std.Io, scheduler: *Scheduler, network: *Network, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
     self.gpa = gpa;
+    self.local_time = 0;
     self.arena = .init(gpa);
     self.scheduler = scheduler;
     try self.file_system.init(gpa);
@@ -105,7 +98,7 @@ pub fn init(
     self.environ_map = try std.process.Environ.createMap(.empty, gpa);
 
     self.real_io = real_io;
-    self.stdin_reader  = std.Io.File.stdin().readerStreaming(real_io, &.{});
+    self.stdin_reader = std.Io.File.stdin().readerStreaming(real_io, &.{});
     self.stdout_writer = std.Io.File.stdout().writerStreaming(real_io, &self.stdout_buffer);
     self.stderr_writer = std.Io.File.stderr().writerStreaming(real_io, &self.stderr_buffer);
 }
@@ -183,11 +176,11 @@ fn unusedDesc(self: *Node) ?*Descriptor {
     return null;
 }
 
-const HandleError = error {
+const HandleError = error{
     InvalidHandle,
 };
 
-pub const CancelError = error {
+pub const CancelError = error{
     Canceled,
 };
 
@@ -237,14 +230,10 @@ pub const CreateDirError = HandleError || FileSystem.CreateError || CancelError;
 
 pub fn createDir(self: *Node, parent: ?Handle, path: []const u8) CreateDirError!void {
     try self.scheduler.sleep(10);
-    return self.file_system.createDir(
-        path,
-        try self.handleToOpenDirOrNULL(parent),
-        self.gpa
-    );
+    return self.file_system.createDir(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
-pub const OpenDirError = error {
+pub const OpenDirError = error{
     DescriptorLimit,
 } || HandleError || FileSystem.OpenError || CancelError;
 
@@ -285,36 +274,24 @@ pub const CreateFileError = HandleError || FileSystem.CreateError || CancelError
 
 pub fn createFile(self: *Node, parent: ?Handle, path: []const u8) CreateFileError!void {
     try self.scheduler.sleep(10);
-    return self.file_system.createFile(
-        path,
-        try self.handleToOpenDirOrNULL(parent),
-        self.gpa
-    );
+    return self.file_system.createFile(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
 pub const DeleteFileError = HandleError || FileSystem.DeleteFileError || CancelError;
 
 pub fn deleteFile(self: *Node, parent: ?Handle, path: []const u8) DeleteFileError!void {
     try self.scheduler.sleep(10);
-    return self.file_system.deleteFile(
-        path,
-        try self.handleToOpenDirOrNULL(parent),
-        self.gpa
-    );
+    return self.file_system.deleteFile(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
 pub const DeleteDirError = HandleError || FileSystem.DeleteDirError || CancelError;
 
 pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!void {
     try self.scheduler.sleep(10);
-    return self.file_system.deleteDir(
-        path,
-        try self.handleToOpenDirOrNULL(parent),
-        self.gpa
-    );
+    return self.file_system.deleteDir(path, try self.handleToOpenDirOrNULL(parent), self.gpa);
 }
 
-pub const OpenFileError = error {
+pub const OpenFileError = error{
     DescriptorLimit,
 } || HandleError || FileSystem.OpenError || CancelError;
 
@@ -383,14 +360,7 @@ fn writeToStderr(self: *Node, source: []const u8) void {
 
 pub const WriteFileError = HandleError || Allocator.Error || CancelError;
 
-pub fn writeFile(
-    self  : *Node,
-    handle: Handle,
-    offset: ?usize,
-    header: []const u8,
-    source: []const []const u8
-) WriteFileError!usize {
-
+pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8, source: []const []const u8) WriteFileError!usize {
     try self.scheduler.sleep(100);
 
     if (handle == 0) {
@@ -441,7 +411,7 @@ pub fn seekFileBy(self: *Node, handle: Handle, offset: i64) SeekFileError!void {
 }
 
 pub const Address = Network.Address;
-pub const ListenError = error {
+pub const ListenError = error{
     DescriptorLimit,
 } || Network.ListenError || CancelError;
 
@@ -453,7 +423,7 @@ pub fn listen(self: *Node, address: Address) ListenError!Handle {
     return self.descToHandle(desc);
 }
 
-pub const AcceptError = error {
+pub const AcceptError = error{
     DescriptorLimit,
 } || HandleError || Network.AcceptError || CancelError;
 
@@ -472,7 +442,7 @@ pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
     }
 }
 
-pub const ConnectError = error {
+pub const ConnectError = error{
     DescriptorLimit,
 } || Network.ConnectError || CancelError;
 

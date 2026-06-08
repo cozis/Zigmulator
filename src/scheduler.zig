@@ -4,8 +4,8 @@ const Node = @import("node.zig");
 
 const Scheduler = @This();
 
-pub const MainEntryPoint = *const fn(std.process.Init) anyerror!void;
-pub const NestedEntryPoint = *const fn(context: *const anyopaque) void;
+pub const MainEntryPoint = *const fn (std.process.Init) anyerror!void;
+pub const NestedEntryPoint = *const fn (context: *const anyopaque) void;
 
 pub const EntryPoint = union(enum) {
     main: MainEntryPoint,
@@ -26,6 +26,7 @@ const ContextSwitch = extern struct {
 
 const STACK_CANARY_SIZE = 256;
 const STACK_CANARY_BYTE = 0xa5;
+const TASK_RUN_COST_US = 50;
 
 pub const TaskID = u64;
 
@@ -38,13 +39,13 @@ const State = enum {
 };
 
 const Task = struct {
-    id    : TaskID,
-    regs  : Registers,
-    stack : []align(16) u8,
-    entry : EntryPoint,
+    id: TaskID,
+    regs: Registers,
+    stack: []align(16) u8,
+    entry: EntryPoint,
     context: ?*const anyopaque,
-    state : State,
-    node  : *Node,
+    state: State,
+    node: *Node,
 
     // If this is a subtask, parent_id refers to the parent.
     // The cancel flag is set when the parent requests cancellation.
@@ -107,7 +108,6 @@ fn spawnInner(
     parent_id: ?TaskID,
     context: ?*const anyopaque,
 ) !*Task {
-
     if (stack_size > std.math.maxInt(usize) - STACK_CANARY_SIZE)
         return Allocator.Error.OutOfMemory;
 
@@ -125,7 +125,7 @@ fn spawnInner(
     const id = self.next_task_id;
     defer self.next_task_id += 1;
 
-    const task = Task {
+    const task = Task{
         .id = id,
         .regs = .{
             .rsp = stack_top,
@@ -133,14 +133,14 @@ fn spawnInner(
             .rip = @intFromPtr(&taskStart),
             .rdi = @intFromPtr(self),
         },
-        .stack  = stack,
-        .entry  = entry,
+        .stack = stack,
+        .entry = entry,
         .context = context,
-        .state  = .ready,
+        .state = .ready,
         .wakeup_time = null,
         .wakeup_tasks = null,
         .wakeup_futex = null,
-        .node   = node,
+        .node = node,
         .parent_id = parent_id,
         .cancel = false,
     };
@@ -196,6 +196,9 @@ fn findBlockedTaskWithLowestWakeupTime(self: *Scheduler) ?*Task {
 fn advanceTimeAndUnblockTasks(self: *Scheduler, new_time: u64) void {
     std.debug.assert(self.current_time < new_time);
     self.current_time = new_time;
+    for (self.tasks.items) |task| {
+        task.node.local_time = @max(task.node.local_time, new_time);
+    }
     for (self.tasks.items) |*task| {
         if (task.state == .blocked) {
             if (task.wakeup_time) |wakeup_time| {
@@ -229,9 +232,7 @@ fn advanceTimeAndPickTask(self: *Scheduler) ?*Task {
 }
 
 pub fn scheduleOne(self: *Scheduler) bool {
-    const task = self.findTaskWithState(.ready)
-        orelse self.advanceTimeAndPickTask()
-        orelse return false;
+    const task = self.findTaskWithState(.ready) orelse self.advanceTimeAndPickTask() orelse return false;
     const id = task.id;
     self.current_id = id;
     task.state = .running;
@@ -258,21 +259,21 @@ fn contextSwitch(old: *Registers, new: *Registers) void {
         :
         : [message] "{rsi}" (&ContextSwitch{ .old = old, .new = new }),
         : .{
-            .rax = true,
-            .rcx = true,
-            .rdx = true,
-            .rbx = true,
-            .rsi = true,
-            .rdi = true,
-            .r8 = true,
-            .r9 = true,
-            .r10 = true,
-            .r11 = true,
-            .r12 = true,
-            .r13 = true,
-            .r14 = true,
-            .r15 = true,
-            .memory = true,
+          .rax = true,
+          .rcx = true,
+          .rdx = true,
+          .rbx = true,
+          .rsi = true,
+          .rdi = true,
+          .r8 = true,
+          .r9 = true,
+          .r10 = true,
+          .r11 = true,
+          .r12 = true,
+          .r13 = true,
+          .r14 = true,
+          .r15 = true,
+          .memory = true,
         });
 }
 
@@ -296,6 +297,7 @@ fn taskStart(self: *Scheduler) callconv(.c) noreturn {
     current.wakeup_time = null;
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
+    current.node.local_time += TASK_RUN_COST_US;
     if (current.parent_id) |parent_id| {
         if (self.findTaskByID(parent_id)) |parent| {
             if (taskIsWaitingFor(parent, current.id)) {
@@ -322,6 +324,7 @@ pub fn sleep(self: *Scheduler, delta_us: u64) !void {
     current.wakeup_time = self.current_time + delta_us;
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
+    current.node.local_time += TASK_RUN_COST_US;
     contextSwitch(&current.regs, &self.regs);
     try self.checkCancel();
 }
@@ -341,6 +344,7 @@ pub fn futexWaitUncancelable(self: *Scheduler, ptr: *const u32, expected: u32) v
     current.wakeup_time = null;
     current.wakeup_tasks = null;
     current.wakeup_futex = ptr;
+    current.node.local_time += TASK_RUN_COST_US;
     contextSwitch(&current.regs, &self.regs);
 }
 
@@ -385,6 +389,7 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.wakeup_time = null;
         task.wakeup_tasks = ids;
         task.wakeup_futex = null;
+        task.node.local_time += TASK_RUN_COST_US;
         contextSwitch(&task.regs, &self.regs);
         try self.checkCancel();
     }
