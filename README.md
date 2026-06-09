@@ -1,18 +1,12 @@
 # Zigmulator
 
-Zigmulator is a Deterministic Simulation Testing framework for Zig.
+Zigmulator is an experimental Deterministic Simulation Testing framework for Zig 0.16
 
-It allows you to run one or more zig programs in a controlled environment with the ability to inject arbitrary I/O faults. The zigmulation is fully deterministic, which allows you to replay any scenario. It's ideal for testing distributed systems where bugs lay in the interleavings of different nodes.
+It allows you to run one or more zig programs in a controlled environment with the ability to inject arbitrary I/O faults. The zigmulation is fully deterministic, which allows you to replay any scenario. It's ideal for testing distributed systems where bugs lay in the interleavings of different nodes. You can learn more about DST [here](DST.md).
 
-It's still under construction, but the basic idea is that you write your programs in the form:
+# Getting Started
 
-```zig
-pub fn main(init: std.process.Init) anyerror!void {
-    // ...
-}
-```
-
-Then import them in the simulation program:
+To run your program in Zigmulator, you need to create a driver program that imports your main() functions and plugs them in a simulator.
 
 ```zig
 const std = @import("std");
@@ -20,6 +14,11 @@ const Io = std.Io;
 
 const Simulator = @import("zigmulator").Simulator;
 
+// Import entry points of the programs to simulate.
+// 
+// The expected interface is:
+//     pub fn main(init: std.process.Init) anyerror!void
+// 
 const programA = @import("projectA/main.zig").main;
 const programB = @import("projectB/main.zig").main;
 const programC = @import("projectC/main.zig").main;
@@ -51,15 +50,7 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-To see this example in action:
-
-```sh
-zig build run
-```
-
-which will build examples/example.zig
-
-## How it works
+## How it Works
 
 Zigmulator implements an in-memory kernel, disk, network and plugs it into your application via the new IO interface (since Zig 0.16). Multiple programs can run in the same simulation, in which case network traffic is routed between their mocks. This is a bruteforce approach but the only one that allows a complete control of the environment the applications are running in.
 
@@ -69,12 +60,14 @@ To avoid non-determinism of kernel-level scheduling, all simulated programs run 
 
 Since Zigmulator mocks the entire world, the main limitation is in how much of it is mocked and how it differs from the real implementation. This project takes a best-effort approach: the model of the external world is simplified, and applications tested with Zigmulator are expected to only rely on functionality that is mocked. For instance, in the Zigmulator model, each process owns its own machine. If you spawn multiple nodes, each will have its own NIC and disk.
 
+Adapting mature projects to DST frameworks is a generally hard thing. For new project it's a good idea to develop inside Zigmulator to only rely on available features and then test the project on real hardware as a sanity check.
+
 ## Current Status
 
-Currently Zigmulator is a proof of concept. A basic version of network, disk, scheduling have been implemented and only the write operations have been mocked.
+Currently Zigmulator implements mocks for the most common functions of `std.Io` like file system operations, network operations, asynchronous tasks. Concurrent tasks and process management are considered out of scope.
 
 ## Visualization
 
-You can also use the simulation trace to create visualizations of what your program is doing
+You can also use the simulation trace to create visualizations of what your program is doing. This is still work-in-progress, but here's a timeline diagram I created the other day:
 
 ![timeline image](timeline.png)
