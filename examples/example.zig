@@ -2,6 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 
 const Simulator = @import("zigmulator");
+const assertSometimes = Simulator.assertSometimes;
+const reachableSometimes = Simulator.reachableSometimes;
 
 fn programA(init: std.process.Init) anyerror!void {
     var stdout = Io.File.stdout().writerStreaming(init.io, &.{});
@@ -9,11 +11,14 @@ fn programA(init: std.process.Init) anyerror!void {
         try stdout.interface.print("Hello from program A!\n", .{});
         try stdout.interface.flush();
 
-        // Taken on the last iteration, so it shows up as taken (✓) in the report.
-        Simulator.assertSometimes(i == 2, @src(), "program A reached its last iteration");
+        // Taken on the last iteration, so it shows up as taken in the report.
+        assertSometimes(i == 2, @src(), "program A reached its last iteration");
 
-        // Never satisfied in this run, so it shows up as not-taken (✗).
-        Simulator.assertSometimes(i > 100, @src(), "program A looped more than 100 times");
+        // Reaching this line is enough to mark this branch as taken.
+        reachableSometimes(@src(), "program A entered its loop body");
+
+        // Never satisfied in this run, so it shows up as missing in the report.
+        assertSometimes(i > 100, @src(), "program A looped more than 100 times");
     }
 }
 
