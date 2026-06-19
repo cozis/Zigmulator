@@ -144,6 +144,25 @@ pub fn build(b: *std.Build) void {
     const tcp_ping_pong_step = b.step("tcp_ping_pong", "Run the TCP ping-pong example");
     tcp_ping_pong_step.dependOn(&run_tcp_ping_pong_cmd.step);
 
+    const fault_coverage_exe = b.addExecutable(.{
+        .name = "fault_coverage",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/fault_coverage.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    fault_coverage_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_fault_coverage_exe = b.addInstallArtifact(fault_coverage_exe, .{});
+    examples_step.dependOn(&install_fault_coverage_exe.step);
+
+    const run_fault_coverage_cmd = b.addRunArtifact(fault_coverage_exe);
+    if (b.args) |args| {
+        run_fault_coverage_cmd.addArgs(args);
+    }
+    const fault_coverage_step = b.step("fault_coverage", "Run the fault coverage probe example");
+    fault_coverage_step.dependOn(&run_fault_coverage_cmd.step);
+
     const diagram_step = b.step("diagram", "Build the diagram generator");
 
     const diagram_exe = b.addExecutable(.{
