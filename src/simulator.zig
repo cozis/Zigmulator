@@ -5,9 +5,10 @@ const Allocator = std.mem.Allocator;
 
 const Trace = @import("trace.zig").Trace;
 const Scheduler = @import("scheduler.zig");
-const Network   = @import("network.zig");
-const Node      = @import("node.zig");
-const Sometimes = @import("sometimes.zig").Sometimes;
+const Network = @import("network.zig");
+const Node = @import("node.zig");
+const sometimes_mod = @import("sometimes.zig");
+const Sometimes = sometimes_mod.Sometimes;
 
 pub const EntryPoint = Scheduler.MainEntryPoint;
 
@@ -26,23 +27,38 @@ var g_sometimes: ?*Sometimes = null;
 //
 // This never changes the behaviour of the program under test: if no simulation
 // is active the call is a no-op.
-pub fn assertSometimes(cond: bool, src: std.builtin.SourceLocation, label: ?[]const u8) void {
+pub fn assertSometimes(cond: bool, comptime src: std.builtin.SourceLocation, comptime label: ?[]const u8) void {
+    const site = sometimes_mod.registerSite(src, label, .assert);
     const registry = g_sometimes orelse return;
-    registry.record(cond, src, label);
+    registry.record(cond, site.*);
+}
+
+// Records that this call site was reached. This is the conditionless form of
+// assertSometimes() for branches where reaching the line is the coverage signal.
+pub fn reachableSometimes(comptime src: std.builtin.SourceLocation, comptime label: ?[]const u8) void {
+    const site = sometimes_mod.registerSite(src, label, .reachable);
+    const registry = g_sometimes orelse return;
+    registry.record(true, site.*);
+}
+
+// Prints every compiled assertSometimes()/reachableSometimes() call site known
+// to this binary. This is independent of whether a simulation has run.
+pub fn reportSometimesSites() void {
+    sometimes_mod.reportCompileTimeSites();
 }
 
 const SpawnOptions = struct {
     stack_size: usize = 64 * 1024,
-    addresses: []const u32 = &[0]u32 {}, // TODO: How do I make an empty slice?
+    addresses: []const u32 = &[0]u32{}, // TODO: How do I make an empty slice?
 };
 
-const SpawnError = error {
+const SpawnError = error{
     InvalidCommand,
     NoSuchProgram,
-} || Allocator.Error ||  std.process.Environ.CreateMapError;
+} || Allocator.Error || std.process.Environ.CreateMapError;
 
 const ExecutableName = struct {
-    name : []const u8,
+    name: []const u8,
     entry: EntryPoint,
 };
 
@@ -68,6 +84,7 @@ pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.real_io = real_io;
     self.next_node_id = 0;
     self.sometimes.init(gpa);
+    self.sometimes.seedCompileTimeSites();
     g_sometimes = &self.sometimes;
 }
 
@@ -90,11 +107,15 @@ pub fn deinit(self: *Simulator) void {
     self.trace.deinit();
 }
 
-// Prints which sometimes-assertions were taken (✓) and which were reached
-// but never satisfied (✗). Called automatically by deinit(); expose it so
+// Prints which sometimes-assertions were taken and which were reached
+// but never satisfied. Called automatically by deinit(); expose it so
 // callers can choose exactly when the report is emitted.
 pub fn reportSometimes(self: *Simulator) void {
     self.sometimes.report();
+}
+
+pub fn sometimesCovered(self: *Simulator) bool {
+    return self.sometimes.allReached();
 }
 
 pub fn setTraceOutputFile(self: *Simulator, path: []const u8) !void {
@@ -102,7 +123,7 @@ pub fn setTraceOutputFile(self: *Simulator, path: []const u8) !void {
 }
 
 pub fn addExecutable(self: *Simulator, name: []const u8, entry: EntryPoint) Allocator.Error!void {
-    try self.executables.append(self.gpa, ExecutableName {
+    try self.executables.append(self.gpa, ExecutableName{
         .name = name,
         .entry = entry,
     });
@@ -121,7 +142,7 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, node_id, command, options.addresses, self.gpa);
 
     try self.nodes.append(self.gpa, node);
-    errdefer _ = self.nodes.swapRemove(self.nodes.items.len-1);
+    errdefer _ = self.nodes.swapRemove(self.nodes.items.len - 1);
 
     try self.scheduler.spawn(node, entry, options.stack_size);
 }
