@@ -30,10 +30,10 @@ const EntityChild = struct {
 };
 
 const Entity = struct {
-    is_dir   : bool,
+    is_dir: bool,
     ref_count: u32 = 0,
-    children : std.ArrayList(EntityChild) = .empty,
-    bytes    : std.ArrayList(u8) = .empty,
+    children: std.ArrayList(EntityChild) = .empty,
+    bytes: std.ArrayList(u8) = .empty,
 
     fn initDir(gpa: Allocator) Allocator.Error!*Entity {
         const self = try gpa.create(Entity);
@@ -95,6 +95,18 @@ const Entity = struct {
         const removed = self.children.swapRemove(index);
         removed.addr.deref(gpa);
     }
+
+    fn contains(self: *Entity, maybe_descendant: *Entity) bool {
+        if (self == maybe_descendant)
+            return true;
+        if (!self.is_dir)
+            return false;
+        for (self.children.items) |child| {
+            if (child.addr.contains(maybe_descendant))
+                return true;
+        }
+        return false;
+    }
 };
 
 pub const OpenDir = struct {
@@ -127,7 +139,7 @@ const ParsePathError = error{
     TooManyComponents,
 };
 
-const ResolvePathError = error {
+const ResolvePathError = error{
     ResolutionLimit,
     ComponentNotDirectory,
     ComponentNotFound,
@@ -140,29 +152,38 @@ const ResolveParent = struct {
 
 const ResolveParentError = ParsePathError || ResolvePathError;
 
-pub const DeleteError = ResolveParentError || error {
+pub const DeleteError = ResolveParentError || error{
     NotFound,
 };
 
-pub const DeleteFileError = DeleteError || error {
+pub const DeleteFileError = DeleteError || error{
     IsDirectory,
 };
 
-pub const DeleteDirError = DeleteError || error {
+pub const DeleteDirError = DeleteError || error{
     NotDirectory,
     DirNotEmpty,
 };
 
-pub const OpenError = error {
+pub const RenameError = ResolveParentError || error{
+    NotFound,
+    IsDirectory,
+    NotDirectory,
+    DirNotEmpty,
+    OutOfMemory,
+    AccessDenied,
+};
+
+pub const OpenError = error{
     IsDirectory,
     NotDirectory,
 } || ParsePathError || ResolvePathError;
 
-pub const ReadDirError = error {
+pub const ReadDirError = error{
     NoMoreItems,
 };
 
-pub const CreateError = error {
+pub const CreateError = error{
     ExistsAlready,
 } || ResolveParentError || Allocator.Error;
 
@@ -178,7 +199,6 @@ pub fn deinit(self: *FileSystem, gpa: Allocator) void {
 }
 
 fn parsePath(path: []const u8, buffer: [][]const u8) ParsePathError![]const []const u8 {
-
     var count: usize = 0;
     var cursor: usize = 0;
 
@@ -192,7 +212,6 @@ fn parsePath(path: []const u8, buffer: [][]const u8) ParsePathError![]const []co
     }
 
     while (cursor < path.len) {
-
         const start = cursor;
         while (cursor < path.len and path[cursor] != '/')
             cursor += 1;
@@ -220,22 +239,16 @@ fn parsePath(path: []const u8, buffer: [][]const u8) ParsePathError![]const []co
     return buffer[0..count];
 }
 
-fn resolvePath(
-    self      : *FileSystem,
-    components: []const []const u8,
-    root      : ?*Entity,
-    buffer    : []*Entity
-) ResolvePathError![]const *Entity {
-
+fn resolvePath(self: *FileSystem, components: []const []const u8, root: ?*Entity, buffer: []*Entity) ResolvePathError![]const *Entity {
     var count: usize = 1;
     buffer[0] = root orelse self.root;
 
     for (components) |component| {
         if (count == buffer.len)
             return ResolvePathError.ResolutionLimit;
-        if (!buffer[count-1].is_dir)
+        if (!buffer[count - 1].is_dir)
             return ResolvePathError.ComponentNotDirectory;
-        const child = buffer[count-1].findChild(component) orelse return ResolvePathError.ComponentNotFound;
+        const child = buffer[count - 1].findChild(component) orelse return ResolvePathError.ComponentNotFound;
         buffer[count] = child.addr;
         count += 1;
     }
@@ -251,19 +264,18 @@ fn resolveParent(self: *FileSystem, path: []const u8, root: ?*Entity) !ResolvePa
     if (components.len == 0)
         return ResolveParentError.EmptyPath; // TODO: This error may not be right
 
-    const path_to_parent = try self.resolvePath(components[0..components.len-1], root, &resolve_buffer);
-    const parent = path_to_parent[path_to_parent.len-1];
+    const path_to_parent = try self.resolvePath(components[0 .. components.len - 1], root, &resolve_buffer);
+    const parent = path_to_parent[path_to_parent.len - 1];
     if (!parent.is_dir)
         return ResolveParentError.ComponentNotDirectory;
 
     return .{
         .parent = parent,
-        .basename = components[components.len-1],
+        .basename = components[components.len - 1],
     };
 }
 
 fn createAny(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, is_dir: bool, gpa: Allocator) CreateError!void {
-
     const result = try self.resolveParent(path, if (root_dir) |r| r.entity else null);
 
     const entity = try if (is_dir) Entity.initDir(gpa) else Entity.initFile(gpa);
@@ -298,13 +310,69 @@ pub fn deleteDir(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, gpa: 
     try result.parent.removeChild(gpa, result.basename);
 }
 
-fn openAny(
-    self     : *FileSystem,
-    path     : []const u8,
-    root_dir : ?*OpenDir,
-    open_dir : *OpenDir,
-    open_file: *OpenFile
-) !bool {
+pub fn rename(
+    self: *FileSystem,
+    old_path: []const u8,
+    old_root_dir: ?*OpenDir,
+    new_path: []const u8,
+    new_root_dir: ?*OpenDir,
+    gpa: Allocator,
+) RenameError!void {
+    const old = try self.resolveParent(old_path, if (old_root_dir) |r| r.entity else null);
+    const new = try self.resolveParent(new_path, if (new_root_dir) |r| r.entity else null);
+
+    const old_index = old.parent.findChildIndex(old.basename) orelse return RenameError.NotFound;
+    const old_child = old.parent.children.items[old_index];
+
+    if (old.parent == new.parent and std.mem.eql(u8, old.basename, new.basename))
+        return;
+
+    if (new.basename.len > ENTITY_NAME_LIMIT)
+        return RenameError.OutOfMemory;
+
+    if (old_child.addr.is_dir and old_child.addr.contains(new.parent))
+        return RenameError.AccessDenied;
+
+    const new_index_maybe = new.parent.findChildIndex(new.basename);
+    if (new_index_maybe) |new_index| {
+        const new_child = new.parent.children.items[new_index];
+        if (old_child.addr.is_dir and !new_child.addr.is_dir)
+            return RenameError.NotDirectory;
+        if (!old_child.addr.is_dir and new_child.addr.is_dir)
+            return RenameError.IsDirectory;
+        if (new_child.addr.is_dir and new_child.addr.children.items.len != 0)
+            return RenameError.DirNotEmpty;
+    }
+
+    if (old.parent == new.parent) {
+        if (new_index_maybe) |new_index| {
+            const removed = old.parent.children.swapRemove(new_index);
+            removed.addr.deref(gpa);
+        }
+        const moved = old.parent.findChild(old.basename) orelse return RenameError.NotFound;
+        moved.setName(new.basename) catch return RenameError.OutOfMemory;
+        return;
+    }
+
+    if (new_index_maybe == null)
+        try new.parent.children.ensureUnusedCapacity(gpa, 1);
+
+    old_child.addr.ref();
+    defer old_child.addr.deref(gpa);
+
+    if (new_index_maybe) |new_index| {
+        const removed = new.parent.children.swapRemove(new_index);
+        removed.addr.deref(gpa);
+    }
+
+    try old.parent.removeChild(gpa, old.basename);
+    new.parent.addChild(gpa, new.basename, old_child.addr) catch |err| switch (err) {
+        error.ExistsAlready => unreachable,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+}
+
+fn openAny(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, open_dir: *OpenDir, open_file: *OpenFile) !bool {
     var component_buffer: [MAX_PATH_COMPONENTS][]const u8 = undefined;
     var resolve_buffer: [MAX_PATH_COMPONENTS]*Entity = undefined;
 
@@ -316,7 +384,7 @@ fn openAny(
     if (resolved.len == 0)
         return OpenError.EmptyPath; // TODO: This error is not right
 
-    const entity = resolved[resolved.len-1];
+    const entity = resolved[resolved.len - 1];
     if (entity.is_dir) {
         open_dir.* = .init(entity);
     } else {
@@ -326,13 +394,7 @@ fn openAny(
     return entity.is_dir;
 }
 
-pub fn openDir(
-    self    : *FileSystem,
-    path    : []const u8,
-    root_dir: ?*OpenDir,
-    open_dir: *OpenDir
-) OpenError!void {
-
+pub fn openDir(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, open_dir: *OpenDir) OpenError!void {
     var dummy: OpenFile = undefined;
     const is_dir = try self.openAny(path, root_dir, open_dir, &dummy);
     if (!is_dir) {
@@ -341,13 +403,7 @@ pub fn openDir(
     open_dir.entity.ref();
 }
 
-pub fn openFile(
-    self     : *FileSystem,
-    path     : []const u8,
-    root_dir : ?*OpenDir,
-    open_file: *OpenFile
-) OpenError!void {
-
+pub fn openFile(self: *FileSystem, path: []const u8, root_dir: ?*OpenDir, open_file: *OpenFile) OpenError!void {
     var dummy: OpenDir = undefined;
     const is_dir = try self.openAny(path, root_dir, &dummy, open_file);
     if (is_dir) {
@@ -371,18 +427,12 @@ pub fn readDir(self: *FileSystem, open_dir: *OpenDir) ReadDirError!ReadDir {
 
     if (open_dir.cursor == 0) {
         open_dir.cursor += 1;
-        return .{
-            .name = ".",
-            .is_dir = true
-        };
+        return .{ .name = ".", .is_dir = true };
     }
 
     if (open_dir.cursor == 1) {
         open_dir.cursor += 1;
-        return .{
-            .name = "..",
-            .is_dir = true
-        };
+        return .{ .name = "..", .is_dir = true };
     }
 
     const index = open_dir.cursor - 2;
@@ -416,13 +466,7 @@ pub fn readFile(self: *FileSystem, open_file: *OpenFile, offset_maybe: ?usize, t
     return num;
 }
 
-pub fn writeFile(
-    self        : *FileSystem,
-    open_file   : *OpenFile,
-    gpa         : Allocator,
-    offset_maybe: ?usize,
-    source      : []const u8
-) Allocator.Error!void {
+pub fn writeFile(self: *FileSystem, open_file: *OpenFile, gpa: Allocator, offset_maybe: ?usize, source: []const u8) Allocator.Error!void {
     _ = self;
 
     const offset = offset_maybe orelse open_file.cursor;
@@ -444,7 +488,7 @@ pub fn fileSize(self: *FileSystem, open_file: *OpenFile) usize {
     return open_file.entity.bytes.items.len;
 }
 
-pub const SeekError = error {
+pub const SeekError = error{
     NegativeOffset,
     Overflow,
 };
@@ -478,13 +522,13 @@ fn dumpEntity(entity: *Entity, depth: u32) void {
         for (entity.children.items) |item| {
             for (0..depth) |_|
                 std.debug.print("  ", .{});
-            std.debug.print("{s}\n", .{ item.getName() });
-            dumpEntity(item.addr, depth+1);
+            std.debug.print("{s}\n", .{item.getName()});
+            dumpEntity(item.addr, depth + 1);
         }
     } else {
         for (0..depth) |_|
             std.debug.print("  ", .{});
-        std.debug.print("[{s}]", .{ entity.bytes.items });
+        std.debug.print("[{s}]", .{entity.bytes.items});
     }
 }
 
