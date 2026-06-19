@@ -7,10 +7,19 @@ const Trace = @import("trace.zig").Trace;
 const Scheduler = @import("scheduler.zig");
 const Network = @import("network.zig");
 const Node = @import("node.zig");
+const PartitionPolicy = @import("partition_policy.zig");
 const sometimes_mod = @import("sometimes.zig");
 const Sometimes = sometimes_mod.Sometimes;
 
 pub const EntryPoint = Scheduler.MainEntryPoint;
+pub const PartitionShape = PartitionPolicy.Shape;
+pub const PartitionShapeWeights = PartitionPolicy.ShapeWeights;
+
+pub const PartitionFaultOptions = struct {
+    weights: PartitionShapeWeights = .{},
+    min_interval_us: u64 = 1_000,
+    max_interval_us: u64 = 10_000,
+};
 
 // Process-global pointer to the active simulation's sometimes-assertion
 // registry. Programs under test only receive an `std.Io` and have no handle to
@@ -67,6 +76,12 @@ trace: Trace,
 prng: std.Random.DefaultPrng,
 scheduler: Scheduler,
 network: Network,
+partition_policy: PartitionPolicy,
+partition_endpoints: std.ArrayList(Network.HostID),
+partition_policy_enabled: bool,
+partition_target_selected: bool,
+partition_fault_options: PartitionFaultOptions,
+next_partition_step_time_us: u64,
 nodes: std.ArrayList(*Node),
 executables: std.ArrayList(ExecutableName),
 real_io: std.Io,
@@ -79,6 +94,12 @@ pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.prng = std.Random.DefaultPrng.init(seed);
     self.scheduler.init(gpa, &self.trace, &self.prng);
     self.network.init(gpa);
+    self.partition_policy.init(gpa, .{});
+    self.partition_endpoints = .empty;
+    self.partition_policy_enabled = false;
+    self.partition_target_selected = false;
+    self.partition_fault_options = .{};
+    self.next_partition_step_time_us = 0;
     self.nodes = .empty;
     self.executables = .empty;
     self.real_io = real_io;
@@ -95,6 +116,8 @@ pub fn deinit(self: *Simulator) void {
         self.sometimes.report();
     g_sometimes = null;
     self.sometimes.deinit();
+    self.partition_policy.deinit();
+    self.partition_endpoints.deinit(self.gpa);
 
     for (self.nodes.items) |node| {
         node.deinit();
@@ -116,6 +139,120 @@ pub fn reportSometimes(self: *Simulator) void {
 
 pub fn sometimesCovered(self: *Simulator) bool {
     return self.sometimes.allReached();
+}
+
+pub const InvalidNodeError = error{
+    InvalidNode,
+};
+
+pub const BreakLinkError = InvalidNodeError || Allocator.Error;
+
+pub fn breakLink(self: *Simulator, a: u32, b: u32) BreakLinkError!void {
+    try self.network.breakLink(
+        self.hostIDForNodeID(a) orelse return InvalidNodeError.InvalidNode,
+        self.hostIDForNodeID(b) orelse return InvalidNodeError.InvalidNode,
+    );
+}
+
+pub fn healLink(self: *Simulator, a: u32, b: u32) InvalidNodeError!void {
+    self.network.healLink(
+        self.hostIDForNodeID(a) orelse return InvalidNodeError.InvalidNode,
+        self.hostIDForNodeID(b) orelse return InvalidNodeError.InvalidNode,
+    );
+}
+
+pub fn linkIsBroken(self: *const Simulator, a: u32, b: u32) InvalidNodeError!bool {
+    return self.network.linkIsBroken(
+        self.hostIDForNodeID(a) orelse return InvalidNodeError.InvalidNode,
+        self.hostIDForNodeID(b) orelse return InvalidNodeError.InvalidNode,
+    );
+}
+
+pub fn setPartitionShapeWeights(self: *Simulator, weights: PartitionShapeWeights) void {
+    self.partition_policy.weights = weights;
+}
+
+pub fn enablePartitionFaults(self: *Simulator, options: PartitionFaultOptions) void {
+    std.debug.assert(options.min_interval_us > 0);
+    std.debug.assert(options.min_interval_us <= options.max_interval_us);
+
+    self.partition_fault_options = options;
+    self.partition_policy.weights = options.weights;
+    self.partition_policy_enabled = true;
+    self.partition_target_selected = false;
+    self.next_partition_step_time_us = self.scheduler.current_time;
+}
+
+pub fn disablePartitionFaults(self: *Simulator) void {
+    self.partition_policy_enabled = false;
+}
+
+pub fn pickPartitionTarget(self: *Simulator) Allocator.Error!PartitionShape {
+    try self.refreshPartitionEndpoints();
+    const shape = try self.partition_policy.pickTarget(self.partition_endpoints.items, self.prng.random());
+    self.partition_target_selected = true;
+    return shape;
+}
+
+pub fn setPartitionTarget(self: *Simulator, shape: PartitionShape) Allocator.Error!void {
+    try self.refreshPartitionEndpoints();
+    try self.partition_policy.setTarget(self.partition_endpoints.items, shape, self.prng.random());
+    self.partition_target_selected = true;
+}
+
+pub fn driftPartitionOne(self: *Simulator) Allocator.Error!bool {
+    try self.refreshPartitionEndpoints();
+    return self.partition_policy.driftOne(&self.network.partitions, self.partition_endpoints.items, self.prng.random());
+}
+
+pub fn partitionAtTarget(self: *Simulator) Allocator.Error!bool {
+    try self.refreshPartitionEndpoints();
+    return self.partition_policy.atTarget(&self.network.partitions, self.partition_endpoints.items);
+}
+
+fn automaticPartitionStep(self: *Simulator) Allocator.Error!void {
+    if (!self.partition_policy_enabled)
+        return;
+
+    const now = self.scheduler.current_time;
+    if (now < self.next_partition_step_time_us)
+        return;
+
+    try self.refreshPartitionEndpoints();
+    if (self.partition_endpoints.items.len < 2)
+        return;
+
+    if (!self.partition_target_selected or self.partition_policy.atTarget(&self.network.partitions, self.partition_endpoints.items)) {
+        _ = try self.partition_policy.pickTarget(self.partition_endpoints.items, self.prng.random());
+        self.partition_target_selected = true;
+    }
+
+    _ = try self.partition_policy.driftOne(&self.network.partitions, self.partition_endpoints.items, self.prng.random());
+    self.next_partition_step_time_us = std.math.add(u64, now, randomPartitionInterval(self)) catch std.math.maxInt(u64);
+}
+
+fn randomPartitionInterval(self: *Simulator) u64 {
+    const min = self.partition_fault_options.min_interval_us;
+    const max = self.partition_fault_options.max_interval_us;
+    if (min == max)
+        return min;
+
+    return min + self.prng.random().uintLessThan(u64, max - min + 1);
+}
+
+fn hostIDForNodeID(self: *const Simulator, id: u32) ?Network.HostID {
+    for (self.nodes.items) |node| {
+        if (node.id == id)
+            return node.network_host.id;
+    }
+    return null;
+}
+
+fn refreshPartitionEndpoints(self: *Simulator) Allocator.Error!void {
+    self.partition_endpoints.clearRetainingCapacity();
+    for (self.nodes.items) |node| {
+        try self.partition_endpoints.append(self.gpa, node.network_host.id);
+    }
 }
 
 pub fn setTraceOutputFile(self: *Simulator, path: []const u8) !void {
@@ -148,6 +285,7 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
 }
 
 pub fn scheduleOne(self: *Simulator) bool {
+    self.automaticPartitionStep() catch {};
     return self.scheduler.scheduleOne();
 }
 
