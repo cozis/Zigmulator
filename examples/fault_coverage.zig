@@ -4,16 +4,32 @@ const net = Io.net;
 
 const Simulator = @import("zigmulator");
 const assertSometimes = Simulator.assertSometimes;
+const reachableSometimes = Simulator.reachableSometimes;
 
 const server_ip = net.Ip4Address.loopback(9090);
 const server_address: net.IpAddress = .{ .ip4 = server_ip };
 const payload = "payload:v1:write-sync-rename-send";
 const ack = "ack";
 
+// Number of request/response cycles performed in a single run. The simulation
+// is long-running on purpose: faults are injected continuously, so a single
+// seed exercises the various "sometimes" behaviors as they occur across cycles.
+const cycles = 256;
+
 fn serverProgram(init: std.process.Init) anyerror!void {
     var server = try server_address.listen(init.io, .{});
     defer server.deinit(init.io);
 
+    // Each cycle handles one connection. A cycle that fails to a fault is
+    // logged by its "sometimes" assertions and then dropped, so the server
+    // keeps serving for the whole run.
+    var cycle: usize = 0;
+    while (cycle < cycles) : (cycle += 1) {
+        serveOne(init, &server) catch {};
+    }
+}
+
+fn serveOne(init: std.process.Init, server: anytype) anyerror!void {
     var stream = try server.accept(init.io);
     defer stream.close(init.io);
 
@@ -26,7 +42,7 @@ fn serverProgram(init: std.process.Init) anyerror!void {
         const n = try reader.interface.readSliceShort(received[copied..]);
         assertSometimes(n < received.len - copied, @src(), "server saw short socket read");
         if (n == 0) {
-            assertSometimes(true, @src(), "server saw EOF before full request");
+            reachableSometimes(@src(), "server saw EOF before full request");
             return error.UnexpectedEof;
         }
         copied += n;
@@ -36,41 +52,61 @@ fn serverProgram(init: std.process.Init) anyerror!void {
 
     var writer_buffer: [0]u8 = undefined;
     var writer = stream.writer(init.io, &writer_buffer);
-    const written = try writer.interface.write(ack);
-    assertSometimes(written < ack.len, @src(), "server saw short socket write");
+    var ack_sent: usize = 0;
+    while (ack_sent < ack.len) {
+        const written = try writer.interface.write(ack[ack_sent..]);
+        assertSometimes(written < ack.len - ack_sent, @src(), "server saw short socket write");
+        ack_sent += written;
+    }
     try writer.interface.flush();
-    assertSometimes(true, @src(), "server completed happy path");
+    reachableSometimes(@src(), "server completed happy path");
 }
 
 fn connectWithRetry(init: std.process.Init) !net.Stream {
     var attempt: usize = 0;
-    while (attempt < 8) : (attempt += 1) {
+    while (true) : (attempt += 1) {
         if (server_address.connect(init.io, .{ .mode = .stream })) |stream| {
             assertSometimes(attempt > 0, @src(), "client connected after retry");
             return stream;
         } else |err| switch (err) {
+            // A partition (HostUnreachable) or a not-yet-listening server
+            // (ConnectionRefused) is transient: keep retrying so every cycle
+            // produces exactly one connection, matching the server's accepts.
             error.ConnectionRefused, error.HostUnreachable => {
-                assertSometimes(true, @src(), "client saw transient connect failure");
+                reachableSometimes(@src(), "client saw transient connect failure");
                 try Io.sleep(init.io, .fromMilliseconds(1), .awake);
             },
             else => return err,
         }
     }
-
-    return error.ConnectionRefused;
 }
 
 fn clientProgram(init: std.process.Init) anyerror!void {
-    try Io.Dir.cwd().createDir(init.io, "spool", .default_dir);
+    Io.Dir.cwd().createDir(init.io, "spool", .default_dir) catch {};
 
     const spool = try Io.Dir.cwd().openDir(init.io, "spool", .{});
     defer spool.close(init.io);
 
+    var cycle: usize = 0;
+    while (cycle < cycles) : (cycle += 1) {
+        clientOnce(init, spool) catch {};
+        try Io.sleep(init.io, .fromMilliseconds(1), .awake);
+    }
+}
+
+fn clientOnce(init: std.process.Init, spool: Io.Dir) anyerror!void {
+    // Clear any artifact left behind by a previous cycle that failed midway.
+    spool.deleteFile(init.io, "message.ready") catch {};
+
     const staged = try spool.createFile(init.io, "message.tmp", .{});
     defer staged.close(init.io);
 
-    const file_written = try staged.writePositional(init.io, &.{payload}, 0);
-    assertSometimes(file_written < payload.len, @src(), "client saw short file write");
+    var file_written: usize = 0;
+    while (file_written < payload.len) {
+        const n = try staged.writePositional(init.io, &.{payload[file_written..]}, file_written);
+        assertSometimes(n < payload.len - file_written, @src(), "client saw short file write");
+        file_written += n;
+    }
 
     try staged.sync(init.io);
 
@@ -89,8 +125,12 @@ fn clientProgram(init: std.process.Init) anyerror!void {
 
     var writer_buffer: [0]u8 = undefined;
     var writer = stream.writer(init.io, &writer_buffer);
-    const socket_written = try writer.interface.write(buffer[0..read_len]);
-    assertSometimes(socket_written < read_len, @src(), "client saw short socket write");
+    var socket_sent: usize = 0;
+    while (socket_sent < read_len) {
+        const n = try writer.interface.write(buffer[socket_sent..read_len]);
+        assertSometimes(n < read_len - socket_sent, @src(), "client saw short socket write");
+        socket_sent += n;
+    }
     try writer.interface.flush();
 
     var reader_buffer: [1]u8 = undefined;
@@ -101,7 +141,7 @@ fn clientProgram(init: std.process.Init) anyerror!void {
         const n = try reader.interface.readSliceShort(response[copied..]);
         assertSometimes(n < response.len - copied, @src(), "client saw short socket read");
         if (n == 0) {
-            assertSometimes(true, @src(), "client saw EOF before full ack");
+            reachableSometimes(@src(), "client saw EOF before full ack");
             return error.UnexpectedEof;
         }
         copied += n;
@@ -110,7 +150,7 @@ fn clientProgram(init: std.process.Init) anyerror!void {
     assertSometimes(!std.mem.eql(u8, &response, ack), @src(), "client saw corrupted ack");
 
     try spool.deleteFile(init.io, "message.ready");
-    assertSometimes(true, @src(), "client completed happy path");
+    reachableSometimes(@src(), "client completed happy path");
 }
 
 pub fn main(init: std.process.Init) !void {
