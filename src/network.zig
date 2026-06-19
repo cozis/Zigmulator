@@ -1,40 +1,40 @@
-
 const std = @import("std");
 
 const Network = @This();
 const Allocator = std.mem.Allocator;
+const Partition = @import("partition.zig");
+
+pub const HostID = Partition.EndpointID;
 
 pub const Address = struct {
     ipv4: u32,
     port: u16,
     pub fn eql(self: Address, other: Address) bool {
-        return self.ipv4 == other.ipv4
-            and self.port == other.port;
+        return self.ipv4 == other.ipv4 and self.port == other.port;
     }
 };
 
-pub const ListenError = error {
+pub const ListenError = error{
     AddressNotAvailable,
     AddressAlreadyUsed,
 } || Allocator.Error;
 
-pub const AcceptError = error {
+pub const AcceptError = error{
     AcceptQueueEmpty,
 } || Allocator.Error;
 
-pub const ConnectError = error {
+pub const ConnectError = error{
     UnavailableHost,
     PeerNotListeningOnAddress,
 } || Allocator.Error;
 
-pub const SendError = error {
+pub const SendError = error{
     NotConnected,
 } || Allocator.Error;
 
-pub const ReadError = error {};
+pub const ReadError = error{};
 
 pub const ListenSocket = struct {
-
     next: ?*ListenSocket,
 
     // A reference to the host is necessary as sockets from
@@ -47,22 +47,21 @@ pub const ListenSocket = struct {
 };
 
 pub const ConnSocket = struct {
-
     next: ?*ConnSocket,
 
     // See comment on ListenSocket
     host: *Host,
 
     peer_listen: ?*ListenSocket,
-    peer_conn  : ?*ConnSocket,
+    peer_conn: ?*ConnSocket,
 
     input_buffer: std.ArrayList(u8),
     pending_output_buffer: std.ArrayList(u8),
 };
 
 pub const Host = struct {
-
     gpa: Allocator,
+    id: HostID,
 
     // Parent network system
     network: *Network,
@@ -74,6 +73,7 @@ pub const Host = struct {
 
     pub fn init(self: *Host, network: *Network, addresses: []const u32, gpa: Allocator) void {
         self.gpa = gpa;
+        self.id = 0;
         self.network = network;
         self.listen_list = null;
         self.conn_list = null;
@@ -81,7 +81,6 @@ pub const Host = struct {
     }
 
     pub fn deinit(self: *Host) void {
-
         while (self.conn_list) |s| {
             self.closeConnSocket(s);
         }
@@ -146,7 +145,6 @@ pub const Host = struct {
     }
 
     pub fn listen(self: *Host, address: Address, socket: *ListenSocket) ListenError!void {
-
         if (!self.isAddressAvailable(address.ipv4))
             return ListenError.AddressNotAvailable;
 
@@ -194,8 +192,9 @@ pub const Host = struct {
     }
 
     pub fn connect(self: *Host, address: Address, new_socket: *ConnSocket) ConnectError!void {
-
         const host = self.network.findHostByIPv4(address.ipv4) orelse return ConnectError.UnavailableHost;
+        if (self.network.partitions.isBroken(self.id, host.id))
+            return ConnectError.UnavailableHost;
         const listen_socket = host.findListenSocket(address) orelse return ConnectError.PeerNotListeningOnAddress;
 
         // Add newly created socket to the connection socket list
@@ -214,7 +213,6 @@ pub const Host = struct {
     }
 
     pub fn closeConnSocket(self: *Host, socket: *ConnSocket) void {
-
         if (socket.peer_listen) |peer| {
             for (peer.accept_queue.items, 0..) |item, i| {
                 if (item == socket) {
@@ -234,7 +232,6 @@ pub const Host = struct {
     }
 
     pub fn closeListenSocket(self: *Host, socket: *ListenSocket) void {
-
         for (socket.accept_queue.items) |peer| {
             peer.peer_listen = null;
         }
@@ -245,11 +242,17 @@ pub const Host = struct {
 
     pub fn send(_: *Host, socket: *ConnSocket, source: []const u8) SendError!usize {
         if (socket.peer_conn) |peer_conn| {
+            if (socket.host.network.partitions.isBroken(socket.host.id, peer_conn.host.id))
+                return SendError.NotConnected;
             if (socket.pending_output_buffer.items.len > 0) {
                 try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, socket.pending_output_buffer.items);
                 socket.pending_output_buffer.clearRetainingCapacity();
             }
             try peer_conn.input_buffer.appendSlice(peer_conn.host.gpa, source);
+        } else if (socket.peer_listen) |peer_listen| {
+            if (socket.host.network.partitions.isBroken(socket.host.id, peer_listen.host.id))
+                return SendError.NotConnected;
+            try socket.pending_output_buffer.appendSlice(socket.host.gpa, source);
         } else {
             try socket.pending_output_buffer.appendSlice(socket.host.gpa, source);
         }
@@ -272,18 +275,25 @@ pub const Host = struct {
 
 gpa: Allocator,
 hosts: std.ArrayList(*Host),
+partitions: Partition,
+next_host_id: HostID,
 
 pub fn init(self: *Network, gpa: Allocator) void {
     self.gpa = gpa;
     self.hosts = .empty;
+    self.partitions.init(gpa);
+    self.next_host_id = 0;
 }
 
 pub fn deinit(self: *Network) void {
+    self.partitions.deinit();
     self.hosts.deinit(self.gpa);
 }
 
 pub fn registerHost(self: *Network, host: *Host) Allocator.Error!void {
     try self.hosts.append(self.gpa, host);
+    host.id = self.next_host_id;
+    self.next_host_id += 1;
     host.network = self;
 }
 
@@ -293,4 +303,81 @@ pub fn findHostByIPv4(self: *Network, ipv4: u32) ?*Host {
             return host;
     }
     return null;
+}
+
+pub fn breakLink(self: *Network, a: HostID, b: HostID) Allocator.Error!void {
+    try self.partitions.breakLink(a, b);
+}
+
+pub fn healLink(self: *Network, a: HostID, b: HostID) void {
+    self.partitions.healLink(a, b);
+}
+
+pub fn linkIsBroken(self: *const Network, a: HostID, b: HostID) bool {
+    return self.partitions.isBroken(a, b);
+}
+
+test "partitioned connect reports unavailable host" {
+    const allocator = std.testing.allocator;
+    const address = Address{ .ipv4 = 1, .port = 8080 };
+
+    var network: Network = undefined;
+    network.init(allocator);
+    defer network.deinit();
+
+    var client: Host = undefined;
+    client.init(&network, &.{2}, allocator);
+    defer client.deinit();
+    try network.registerHost(&client);
+
+    var server: Host = undefined;
+    server.init(&network, &.{address.ipv4}, allocator);
+    defer server.deinit();
+    try network.registerHost(&server);
+
+    var listener: ListenSocket = undefined;
+    try server.listen(address, &listener);
+
+    try network.breakLink(client.id, server.id);
+
+    var socket: ConnSocket = undefined;
+    try std.testing.expectError(ConnectError.UnavailableHost, client.connect(address, &socket));
+}
+
+test "partitioned send fails without destroying existing connection" {
+    const allocator = std.testing.allocator;
+    const address = Address{ .ipv4 = 1, .port = 8080 };
+
+    var network: Network = undefined;
+    network.init(allocator);
+    defer network.deinit();
+
+    var client: Host = undefined;
+    client.init(&network, &.{2}, allocator);
+    defer client.deinit();
+    try network.registerHost(&client);
+
+    var server: Host = undefined;
+    server.init(&network, &.{address.ipv4}, allocator);
+    defer server.deinit();
+    try network.registerHost(&server);
+
+    var listener: ListenSocket = undefined;
+    try server.listen(address, &listener);
+
+    var client_socket: ConnSocket = undefined;
+    try client.connect(address, &client_socket);
+
+    var server_socket: ConnSocket = undefined;
+    try server.accept(&listener, &server_socket);
+
+    try network.breakLink(client.id, server.id);
+    try std.testing.expectError(SendError.NotConnected, client.send(&client_socket, "hello"));
+
+    network.healLink(client.id, server.id);
+    try std.testing.expectEqual(@as(usize, 5), try client.send(&client_socket, "hello"));
+
+    var buffer: [5]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 5), server.read(&server_socket, &buffer));
+    try std.testing.expectEqualStrings("hello", &buffer);
 }
