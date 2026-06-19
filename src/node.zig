@@ -537,7 +537,8 @@ pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadF
             self.trace.failIO(pending_trace, e);
             return e;
         };
-        const result = self.file_system.readFile(&desc.file, offset, target);
+        const want = self.shortenForFault(target.len);
+        const result = self.file_system.readFile(&desc.file, offset, target[0..want]);
         self.trace.completeIO(pending_trace, result);
         return result;
     }
@@ -594,17 +595,29 @@ pub fn writeFile(self: *Node, handle: Handle, offset: ?usize, header: []const u8
             self.trace.failIO(pending_trace, e);
             return e;
         };
-        self.file_system.writeFile(&desc.file, self.gpa, offset, header) catch |e| {
+
+        var total = header.len;
+        for (source) |item| total += item.len;
+        var budget = self.shortenForFault(total);
+
+        const h = @min(budget, header.len);
+        self.file_system.writeFile(&desc.file, self.gpa, offset, header[0..h]) catch |e| {
             self.trace.failIO(pending_trace, e);
             return e;
         };
-        copied += header.len;
+        copied += h;
+        budget -= h;
+
         for (source) |item| {
-            self.file_system.writeFile(&desc.file, self.gpa, null, item) catch |e| {
+            if (budget == 0)
+                break;
+            const w = @min(budget, item.len);
+            self.file_system.writeFile(&desc.file, self.gpa, null, item[0..w]) catch |e| {
                 self.trace.failIO(pending_trace, e);
                 return e;
             };
-            copied += item.len;
+            copied += w;
+            budget -= w;
         }
         self.trace.completeIO(pending_trace, copied);
         return copied;
@@ -722,6 +735,13 @@ pub fn connect(self: *Node, address: Address) ConnectError!Handle {
 
 pub const ReadSocketError = HandleError || CancelError;
 
+// TODO: make this configurable
+fn shortenForFault(self: *Node, len: usize) usize {
+    if (len <= 1)
+        return len;
+    return 1 + self.prng.random().uintLessThan(usize, len);
+}
+
 pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSocketError!usize {
     const pending_trace = self.trace.beginIO(false, @src());
 
@@ -735,11 +755,13 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
         return e;
     };
 
+    const want = self.shortenForFault(target.len);
+
     if (block) {
         while (true) {
             try self.fakeDelayForIo(pending_trace, Delay.socket_read_poll);
 
-            const num = self.network_host.read(&desc.conn, target);
+            const num = self.network_host.read(&desc.conn, target[0..want]);
 
             if (num > 0) {
                 self.trace.completeIO(pending_trace, num);
@@ -755,7 +777,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
         }
         unreachable;
     } else {
-        const num = self.network_host.read(&desc.conn, target);
+        const num = self.network_host.read(&desc.conn, target[0..want]);
         self.trace.completeIO(pending_trace, num);
         return num;
     }
@@ -771,7 +793,8 @@ pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketE
         self.trace.failIO(pending_trace, e);
         return e;
     };
-    const result = self.network_host.send(&desc.conn, source) catch |e| {
+    const want = self.shortenForFault(source.len);
+    const result = self.network_host.send(&desc.conn, source[0..want]) catch |e| {
         self.trace.failIO(pending_trace, e);
         return e;
     };
