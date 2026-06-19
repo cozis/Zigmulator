@@ -761,12 +761,28 @@ fn dirDeleteDir(userdata: ?*anyopaque, dir: Dir, sub_path: []const u8) Dir.Delet
 }
 
 fn dirRename(userdata: ?*anyopaque, old_dir: Dir, old_sub_path: []const u8, new_dir: Dir, new_sub_path: []const u8) Dir.RenameError!void {
-    _ = userdata;
-    _ = old_dir;
-    _ = old_sub_path;
-    _ = new_dir;
-    _ = new_sub_path;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    const old_parent = if (old_dir.handle == Dir.cwd().handle) null else old_dir.handle;
+    const new_parent = if (new_dir.handle == Dir.cwd().handle) null else new_dir.handle;
+
+    node.rename(old_parent, old_sub_path, new_parent, new_sub_path) catch |e| {
+        return switch (e) {
+            Node.RenameError.InvalidHandle => unreachable,
+            Node.RenameError.EmptyPath => Dir.RenameError.BadPathName,
+            Node.RenameError.NoRootParent => Dir.RenameError.FileNotFound,
+            Node.RenameError.TooManyComponents => Dir.RenameError.NameTooLong,
+            Node.RenameError.ResolutionLimit => Dir.RenameError.NameTooLong,
+            Node.RenameError.ComponentNotDirectory => Dir.RenameError.NotDir,
+            Node.RenameError.ComponentNotFound => Dir.RenameError.FileNotFound,
+            Node.RenameError.NotFound => Dir.RenameError.FileNotFound,
+            Node.RenameError.IsDirectory => Dir.RenameError.IsDir,
+            Node.RenameError.NotDirectory => Dir.RenameError.NotDir,
+            Node.RenameError.DirNotEmpty => Dir.RenameError.DirNotEmpty,
+            Node.RenameError.OutOfMemory => Dir.RenameError.SystemResources,
+            Node.RenameError.AccessDenied => Dir.RenameError.AccessDenied,
+            Node.RenameError.Canceled => return error.Canceled,
+        };
+    };
 }
 
 fn dirRenamePreserve(userdata: ?*anyopaque, old_dir: Dir, old_sub_path: []const u8, new_dir: Dir, new_sub_path: []const u8) Dir.RenamePreserveError!void {
