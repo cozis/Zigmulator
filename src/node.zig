@@ -22,6 +22,7 @@ const Delay = struct {
     const dir_create = DelayRange{ .min_us = 20, .max_us = 80 };
     const dir_delete = DelayRange{ .min_us = 20, .max_us = 80 };
     const dir_open = DelayRange{ .min_us = 20, .max_us = 80 };
+    const dir_rename = DelayRange{ .min_us = 20, .max_us = 100 };
     const dir_reset = DelayRange{ .min_us = 1, .max_us = 5 };
     const dir_read = DelayRange{ .min_us = 10, .max_us = 40 };
 
@@ -417,6 +418,27 @@ pub fn deleteDir(self: *Node, parent: ?Handle, path: []const u8) DeleteDirError!
         return e;
     };
     self.file_system.deleteDir(path, parent_dir, self.gpa) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
+}
+
+pub const RenameError = HandleError || FileSystem.RenameError || CancelError;
+
+pub fn rename(self: *Node, old_parent: ?Handle, old_path: []const u8, new_parent: ?Handle, new_path: []const u8) RenameError!void {
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.dir_rename);
+    const old_parent_dir = self.handleToOpenDirOrNULL(old_parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    const new_parent_dir = self.handleToOpenDirOrNULL(new_parent) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.rename(old_path, old_parent_dir, new_path, new_parent_dir, self.gpa) catch |e| {
         self.trace.failIO(pending_trace, e);
         return e;
     };
