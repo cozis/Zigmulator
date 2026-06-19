@@ -5,9 +5,15 @@ const Simulator = @import("zigmulator");
 
 fn programA(init: std.process.Init) anyerror!void {
     var stdout = Io.File.stdout().writerStreaming(init.io, &.{});
-    for (0..3) |_| {
+    for (0..3) |i| {
         try stdout.interface.print("Hello from program A!\n", .{});
         try stdout.interface.flush();
+
+        // Taken on the last iteration, so it shows up as taken (✓) in the report.
+        Simulator.assertSometimes(i == 2, @src(), "program A reached its last iteration");
+
+        // Never satisfied in this run, so it shows up as not-taken (✗).
+        Simulator.assertSometimes(i > 100, @src(), "program A looped more than 100 times");
     }
 }
 
