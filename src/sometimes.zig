@@ -229,14 +229,27 @@ pub const Sometimes = struct {
 
         std.debug.print("\n=== Sometimes assertions: {d}/{d} taken ===\n", .{ taken, self.entries.items.len });
         for (self.entries.items) |entry| {
-            std.debug.print("  [{d}/{d}] {s}:{d}:{d} ({s})", .{
-                entry.true_count,
-                entry.eval_count,
-                entry.file,
-                entry.line,
-                entry.column,
-                entry.fn_name,
-            });
+            // A reachable site has no meaningful condition, so its true/eval
+            // ratio is always N/N; print just the hit count. An assert site's
+            // ratio shows how often the condition held, which is useful.
+            if (std.mem.eql(u8, entry.kind_name, "reachable")) {
+                std.debug.print("  [{d}] {s}:{d}:{d} ({s})", .{
+                    entry.true_count,
+                    entry.file,
+                    entry.line,
+                    entry.column,
+                    entry.fn_name,
+                });
+            } else {
+                std.debug.print("  [{d}/{d}] {s}:{d}:{d} ({s})", .{
+                    entry.true_count,
+                    entry.eval_count,
+                    entry.file,
+                    entry.line,
+                    entry.column,
+                    entry.fn_name,
+                });
+            }
             if (entry.label) |label|
                 std.debug.print(" \"{s}\"", .{label});
             std.debug.print("\n", .{});
