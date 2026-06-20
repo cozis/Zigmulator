@@ -72,6 +72,7 @@ extern const __stop_zigmulator_sometimes: Site;
 
 pub fn registerSite(comptime src: SourceLocation, comptime label: ?[]const u8, comptime kind: SiteKind) *const Site {
     const SiteDecl = struct {
+        // TODO: maybe var instead of const?
         const site linksection(sometimes_section) = Site.init(src, label, kind);
     };
     return &SiteDecl.site;
