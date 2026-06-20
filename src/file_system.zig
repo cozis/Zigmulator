@@ -488,6 +488,21 @@ pub fn fileSize(self: *FileSystem, open_file: *OpenFile) usize {
     return open_file.entity.bytes.items.len;
 }
 
+// Resize the file like ftruncate(2): shrinking discards the tail, growing
+// zero-fills. The offset is left in place except where it would fall past the
+// new end, which we clamp so a later read/write can't slice out of bounds.
+pub fn setFileLength(self: *FileSystem, open_file: *OpenFile, gpa: Allocator, length: usize) Allocator.Error!void {
+    _ = self;
+    const current = open_file.entity.bytes.items.len;
+    if (length < current) {
+        open_file.entity.bytes.shrinkRetainingCapacity(length);
+    } else if (length > current) {
+        try open_file.entity.bytes.appendNTimes(gpa, 0, length - current);
+    }
+    if (open_file.cursor > length)
+        open_file.cursor = length;
+}
+
 pub const SeekError = error{
     NegativeOffset,
     Overflow,
