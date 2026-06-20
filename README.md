@@ -6,13 +6,55 @@ It allows you to run one or more zig programs in a controlled environment with t
 
 # Getting Started
 
+## Add Zigmulator To A Project
+
+Add Zigmulator as a package dependency in your project's `build.zig.zon`.
+For a local checkout:
+
+```zig
+.dependencies = .{
+    .zigmulator = .{
+        .path = "../Zigmulator",
+    },
+},
+```
+
+For a remote dependency, use `zig fetch --save <url>` and let Zig add the
+URL and hash to `build.zig.zon`.
+
+Then expose the module to your simulation driver from `build.zig`:
+
+```zig
+const target = b.standardTargetOptions(.{});
+const optimize = b.standardOptimizeOption(.{});
+
+const zigmulator_dep = b.dependency("zigmulator", .{
+    .target = target,
+    .optimize = optimize,
+});
+
+const simulation = b.addExecutable(.{
+    .name = "simulate",
+    .root_module = b.createModule(.{
+        .root_source_file = b.path("simulation.zig"),
+        .target = target,
+        .optimize = optimize,
+    }),
+});
+simulation.root_module.addImport("zigmulator", zigmulator_dep.module("zigmulator"));
+
+const run_simulation = b.addRunArtifact(simulation);
+const simulate_step = b.step("simulate", "Run the deterministic simulation");
+simulate_step.dependOn(&run_simulation.step);
+```
+
 To run your program in Zigmulator, you need to create a driver program that imports your main() functions and plugs them in a simulator.
 
 ```zig
 const std = @import("std");
 const Io = std.Io;
 
-const Simulator = @import("zigmulator").Simulator;
+const Simulator = @import("zigmulator");
 
 // Import entry points of the programs to simulate.
 // 
