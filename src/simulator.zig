@@ -56,6 +56,13 @@ pub fn reportSometimesSites() void {
     sometimes_mod.reportCompileTimeSites();
 }
 
+var g_events: ?*u32 = null;
+
+pub fn event(index: u32) void {
+    const word = g_events orelse return;
+    word.* |= @as(u32, 1) << @intCast(index);
+}
+
 const SpawnOptions = struct {
     stack_size: usize = 64 * 1024,
     addresses: []const u32 = &[0]u32{}, // TODO: How do I make an empty slice?
@@ -87,6 +94,7 @@ executables: std.ArrayList(ExecutableName),
 real_io: std.Io,
 next_node_id: u32,
 sometimes: Sometimes,
+events: u32,
 
 pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.gpa = gpa;
@@ -107,6 +115,8 @@ pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.sometimes.init(gpa);
     self.sometimes.seedCompileTimeSites();
     g_sometimes = &self.sometimes;
+    self.events = 0;
+    g_events = &self.events;
 }
 
 pub fn deinit(self: *Simulator) void {
@@ -115,6 +125,7 @@ pub fn deinit(self: *Simulator) void {
     if (!self.sometimes.reported)
         self.sometimes.report();
     g_sometimes = null;
+    g_events = null;
     self.sometimes.deinit();
     self.partition_policy.deinit();
     self.partition_endpoints.deinit(self.gpa);
@@ -297,8 +308,13 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
 }
 
 pub fn scheduleOne(self: *Simulator) bool {
+    self.events = 0;
     self.automaticPartitionStep() catch {};
     return self.scheduler.scheduleOne();
+}
+
+pub fn eventRaised(self: *const Simulator, index: u32) bool {
+    return (self.events & (@as(u32, 1) << @intCast(index))) != 0;
 }
 
 pub fn dumpFiles(self: *Simulator) void {
