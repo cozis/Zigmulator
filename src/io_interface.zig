@@ -1309,10 +1309,11 @@ fn netAccept(userdata: ?*anyopaque, listen_handle: net.Socket.Handle, options: n
         error.OutOfMemory => return error.SystemResources,
         error.Canceled => return error.Canceled,
     };
+    const remote_address = node.remoteAddress(handle) catch return error.SocketNotListening;
 
     return .{
         .handle = handle,
-        .address = .{ .ip4 = .unspecified(0) },
+        .address = nodeAddressToIpAddress(remote_address),
     };
 }
 
