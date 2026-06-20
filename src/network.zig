@@ -24,6 +24,7 @@ pub const AcceptError = error{
 } || Allocator.Error;
 
 pub const ConnectError = error{
+    AddressNotAvailable,
     UnavailableHost,
     PeerNotListeningOnAddress,
 } || Allocator.Error;
@@ -52,6 +53,8 @@ pub const ConnSocket = struct {
     // See comment on ListenSocket
     host: *Host,
 
+    local_address: Address,
+    remote_address: Address,
     peer_listen: ?*ListenSocket,
     peer_conn: ?*ConnSocket,
 
@@ -144,6 +147,15 @@ pub const Host = struct {
         return false;
     }
 
+    fn sourceAddress(self: *Host) ConnectError!Address {
+        if (self.available_addresses_ipv4.len == 0)
+            return ConnectError.AddressNotAvailable;
+        return .{
+            .ipv4 = self.available_addresses_ipv4[0],
+            .port = 0,
+        };
+    }
+
     pub fn listen(self: *Host, address: Address, socket: *ListenSocket) ListenError!void {
         if (!self.isAddressAvailable(address.ipv4))
             return ListenError.AddressNotAvailable;
@@ -169,6 +181,8 @@ pub const Host = struct {
         errdefer self.unlinkConnSocket(new_socket);
 
         // Initialize other fields
+        new_socket.local_address = socket.address;
+        new_socket.remote_address = peer_socket.local_address;
         new_socket.peer_listen = null;
         new_socket.input_buffer = .empty;
         new_socket.pending_output_buffer = .empty;
@@ -201,6 +215,8 @@ pub const Host = struct {
         self.linkConnSocket(new_socket);
         errdefer self.unlinkConnSocket(new_socket);
 
+        new_socket.local_address = try self.sourceAddress();
+        new_socket.remote_address = address;
         new_socket.peer_listen = listen_socket;
         new_socket.peer_conn = null;
         new_socket.input_buffer = .empty;
