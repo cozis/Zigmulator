@@ -116,6 +116,22 @@ pub fn build(b: *std.Build) void {
     const install_sleep_exe = b.addInstallArtifact(sleep_exe, .{});
     examples_step.dependOn(&install_sleep_exe.step);
 
+    const crash_recovery_exe = b.addExecutable(.{
+        .name = "crash_recovery",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/crash_recovery.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    crash_recovery_exe.root_module.addImport("zigmulator", zigmulator);
+    const install_crash_recovery_exe = b.addInstallArtifact(crash_recovery_exe, .{});
+    examples_step.dependOn(&install_crash_recovery_exe.step);
+
+    const run_crash_recovery_cmd = b.addRunArtifact(crash_recovery_exe);
+    const crash_recovery_step = b.step("crash_recovery", "Run the crash/restart recovery example");
+    crash_recovery_step.dependOn(&run_crash_recovery_cmd.step);
+
     const select_group_async_exe = b.addExecutable(.{
         .name = "select_group_async",
         .root_module = b.createModule(.{
