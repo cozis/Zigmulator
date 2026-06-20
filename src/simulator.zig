@@ -304,7 +304,7 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     try self.nodes.append(self.gpa, node);
     errdefer _ = self.nodes.swapRemove(self.nodes.items.len - 1);
 
-    try self.scheduler.spawn(node, entry, options.stack_size);
+    _ = try self.scheduler.spawn(node, entry, options.stack_size);
 }
 
 pub fn scheduleOne(self: *Simulator) bool {

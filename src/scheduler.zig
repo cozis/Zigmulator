@@ -37,6 +37,11 @@ const State = enum {
     blocked,
     failed,
     returned,
+    crashed,
+
+    pub fn isCompleted(self: State) bool {
+        return self == .failed or self == .crashed or self == .returned;
+    }
 };
 
 const Task = struct {
@@ -100,8 +105,8 @@ fn traceTaskState(self: *Scheduler, task: *const Task, state: Trace.TaskState, r
     self.trace.taskState(task.id, task.node, state, reason);
 }
 
-pub fn spawn(self: *Scheduler, node: *Node, entry: MainEntryPoint, stack_size: usize) !void {
-    _ = try self.spawnInner(node, .{ .main = entry }, stack_size, null, null);
+pub fn spawn(self: *Scheduler, node: *Node, entry: MainEntryPoint, stack_size: usize) !TaskID {
+    return (try self.spawnInner(node, .{ .main = entry }, stack_size, null, null)).id;
 }
 
 pub fn spawnNested(self: *Scheduler, node: *Node, entry: NestedEntryPoint, context: *const anyopaque) !TaskID {
@@ -166,12 +171,79 @@ fn spawnInner(
 // The intended use-case is undoing a previous call .spawnNested to
 // in case of errors.
 pub fn despawnNested(self: *Scheduler, id: TaskID) void {
+    self.removeTask(id);
+}
+
+fn removeTask(self: *Scheduler, id: TaskID) void {
     const index = self.findTaskIndexByID(id) orelse return;
     const task = &self.tasks.items[index];
-
+    if (self.current_id != null and self.current_id.? == task.id)
+        self.current_id = null;
     self.trace.taskRemoved(task.id, task.node);
     std.heap.page_allocator.free(task.stack);
     _ = self.tasks.orderedRemove(index);
+}
+
+fn findChildOf(self: *Scheduler, parent_id: TaskID) ?TaskID {
+    for (self.tasks.items) |task| {
+        if (task.parent_id == parent_id)
+            return task.id;
+    }
+    return null;
+}
+
+fn removeDescendants(self: *Scheduler, parent_id: TaskID) void {
+    while (self.findChildOf(parent_id)) |child_id| {
+        self.removeDescendants(child_id);
+        self.removeTask(child_id);
+    }
+}
+
+fn markTaskCrashed(self: *Scheduler, id: TaskID) void {
+    const task = self.findTaskByID(id) orelse return;
+
+    if (self.current_id != null and self.current_id.? == task.id)
+        self.current_id = null;
+
+    task.state = .crashed;
+    task.wakeup_time = null;
+    task.wakeup_tasks = null;
+    task.wakeup_futex = null;
+    task.cancel = false;
+    self.traceTaskState(task, .crashed, "node crashed");
+}
+
+// Tears down a task tree. Subtasks are always removed; the root is either
+// removed outright or kept and marked crashed as a record that the process died.
+pub fn removeTaskTree(self: *Scheduler, root_id: TaskID, keep_root_but_mark_crashed: bool) void {
+    self.removeDescendants(root_id);
+    if (keep_root_but_mark_crashed)
+        self.markTaskCrashed(root_id)
+    else
+        self.removeTask(root_id);
+}
+
+pub fn terminate(self: *Scheduler, id: TaskID) void {
+    _ = self.cancel(id);
+    while (true) {
+        const task = self.findTaskByID(id) orelse break;
+        switch (task.state) {
+            .ready => {},
+            .blocked => {
+                // Don't wait for the task to wake up on its own; force the
+                // blocking operation to return Canceled instead.
+                _ = self.cancel(id);
+            },
+            .running, .failed, .returned, .crashed => break,
+        }
+
+        const ready = self.findTaskByID(id) orelse break;
+        if (ready.state != .ready)
+            break;
+
+        if (!self.runTask(id))
+            break;
+    }
 }
 
 fn countTasksWithState(self: *Scheduler, state: State) usize {
@@ -252,6 +324,14 @@ fn advanceTimeAndUnblockTasks(self: *Scheduler, new_time: u64) void {
     }
 }
 
+// Jumps the clock forward to `new_time`, waking any tasks whose sleep elapsed.
+// Unlike the task-driven time advance, this lets an external timer (e.g. the
+// fault injector) move time when no task is scheduled to do so.
+pub fn advanceTimeTo(self: *Scheduler, new_time: u64) void {
+    if (new_time > self.current_time)
+        self.advanceTimeAndUnblockTasks(new_time);
+}
+
 fn taskIsWaitingFor(task: *const Task, id: TaskID) bool {
     if (task.state != .blocked)
         return false;
@@ -273,11 +353,19 @@ fn advanceTimeAndPickTask(self: *Scheduler) ?*Task {
 pub fn scheduleOne(self: *Scheduler) bool {
     const task = self.pickReadyTask() orelse self.advanceTimeAndPickTask() orelse return false;
     const id = task.id;
+    return self.runTask(id);
+}
+
+fn runTask(self: *Scheduler, id: TaskID) bool {
+    const task = self.findTaskByID(id) orelse return false;
+    std.debug.assert(task.state == .ready);
+
     self.current_id = id;
     task.state = .running;
     self.traceTaskState(task, .running, "scheduled");
     contextSwitch(&self.regs, &task.regs);
     self.trace.leaveTask();
+    self.current_id = null;
     const current = self.findTaskByID(id) orelse return true;
     if (!current.stackCanaryIsIntact())
         @panic("Task stack canary was overwritten");
@@ -351,6 +439,8 @@ fn taskStart(self: *Scheduler) callconv(.c) noreturn {
                 self.traceTaskState(parent, .ready, "child completed");
             }
         }
+    } else {
+        self.removeDescendants(current.id);
     }
     contextSwitch(&current.regs, &self.regs);
     unreachable;
@@ -451,17 +541,22 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
     }
 }
 
-pub fn cancel(self: *Scheduler, id: TaskID) void {
-    const child = self.findTaskByID(id) orelse return;
-    std.debug.assert(child.parent_id == self.current_id);
-    child.cancel = true;
-    if (child.state == .blocked) {
-        child.state = .ready;
-        child.wakeup_time = null;
-        child.wakeup_tasks = null;
-        child.wakeup_futex = null;
-        self.traceTaskState(child, .ready, "cancel");
+pub fn cancel(self: *Scheduler, id: TaskID) bool {
+    const task = self.findTaskByID(id) orelse return false;
+    if (self.current_id) |current_id|
+        std.debug.assert(task.parent_id == current_id);
+    if (task.state.isCompleted())
+        return false;
+
+    task.cancel = true;
+    if (task.state == .blocked) {
+        task.state = .ready;
+        task.wakeup_time = null;
+        task.wakeup_tasks = null;
+        task.wakeup_futex = null;
+        self.traceTaskState(task, .ready, "cancel");
     }
+    return true;
 }
 
 pub fn checkCancel(self: *Scheduler) !void {

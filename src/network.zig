@@ -91,6 +91,8 @@ pub const Host = struct {
         while (self.listen_list) |s| {
             self.closeListenSocket(s);
         }
+
+        self.network.unregisterHost(self);
     }
 
     fn linkConnSocket(self: *Host, socket: *ConnSocket) void {
@@ -311,6 +313,15 @@ pub fn registerHost(self: *Network, host: *Host) Allocator.Error!void {
     host.id = self.next_host_id;
     self.next_host_id += 1;
     host.network = self;
+}
+
+pub fn unregisterHost(self: *Network, host: *Host) void {
+    for (self.hosts.items, 0..) |item, i| {
+        if (item == host) {
+            _ = self.hosts.swapRemove(i);
+            return;
+        }
+    }
 }
 
 pub fn findHostByIPv4(self: *Network, ipv4: u32) ?*Host {

@@ -194,7 +194,7 @@ pub fn despawn(self: *Node, id: TaskID) void {
 }
 
 pub fn cancel(self: *Node, id: TaskID) void {
-    self.scheduler.cancel(id);
+    _ = self.scheduler.cancel(id);
 }
 
 pub fn checkCancel(self: *Node) !void {
