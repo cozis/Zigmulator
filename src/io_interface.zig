@@ -1012,10 +1012,12 @@ fn fileSupportsAnsiEscapeCodes(userdata: ?*anyopaque, file: File) Cancelable!boo
 }
 
 fn fileSetLength(userdata: ?*anyopaque, file: File, length: u64) File.SetLengthError!void {
-    _ = userdata;
-    _ = file;
-    _ = length;
-    @panic("Not implemented yet");
+    const node: *Node = @ptrCast(@alignCast(userdata.?));
+    node.setFileLength(file.handle, @intCast(length)) catch |err| switch (err) {
+        error.InvalidHandle => return error.AccessDenied,
+        error.OutOfMemory => return error.InputOutput,
+        error.Canceled => return error.Canceled,
+    };
 }
 
 fn fileSetOwner(userdata: ?*anyopaque, file: File, owner: ?File.Uid, group: ?File.Gid) File.SetOwnerError!void {
