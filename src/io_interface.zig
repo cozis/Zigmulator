@@ -447,13 +447,16 @@ fn operate(userdata: ?*anyopaque, operation: Operation) Cancelable!Operation.Res
     const node: *Node = @ptrCast(@alignCast(userdata.?));
     return switch (operation) {
         .file_write_streaming => |op| .{
-            .file_write_streaming = fileWriteStreaming(node, op),
+            .file_write_streaming = fileWriteStreaming(node, op) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
+                else => |e| e,
+            },
         },
         else => @panic("Not implemented yet"),
     };
 }
 
-fn fileWriteStreaming(node: *Node, op: Operation.FileWriteStreaming) Operation.FileWriteStreaming.Result {
+fn fileWriteStreaming(node: *Node, op: Operation.FileWriteStreaming) (Operation.FileWriteStreaming.Error || error{Canceled})!usize {
     var copied: usize = 0;
     copied += writeFile(node, op.file, null, op.header, op.data[0 .. op.data.len - 1]) catch |err| return err;
 
@@ -464,11 +467,11 @@ fn fileWriteStreaming(node: *Node, op: Operation.FileWriteStreaming) Operation.F
     return copied;
 }
 
-fn writeFile(node: *Node, file: File, offset: ?usize, header: []const u8, data: []const []const u8) Operation.FileWriteStreaming.Error!usize {
+fn writeFile(node: *Node, file: File, offset: ?usize, header: []const u8, data: []const []const u8) (Operation.FileWriteStreaming.Error || error{Canceled})!usize {
     return node.writeFile(file.handle, offset, header, data) catch |err| switch (err) {
         error.InvalidHandle => error.NotOpenForWriting,
         error.OutOfMemory => error.SystemResources,
-        error.Canceled => @panic("TODO"),
+        error.Canceled => error.Canceled,
     };
 }
 
