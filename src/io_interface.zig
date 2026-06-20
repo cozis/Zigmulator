@@ -1336,6 +1336,7 @@ fn netConnectIp(userdata: ?*anyopaque, address: *const net.IpAddress, options: n
     const node_address = ipAddressToNodeAddress(address) orelse return error.AddressFamilyUnsupported;
     const handle = node.connect(node_address) catch |err| switch (err) {
         error.DescriptorLimit => return error.ProcessFdQuotaExceeded,
+        error.AddressNotAvailable => return error.AddressUnavailable,
         error.UnavailableHost => return error.HostUnreachable,
         error.PeerNotListeningOnAddress => return error.ConnectionRefused,
         error.OutOfMemory => return error.SystemResources,
