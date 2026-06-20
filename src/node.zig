@@ -66,22 +66,76 @@ const Descriptor = struct {
 gpa: Allocator,
 trace: *Trace,
 prng: *std.Random.DefaultPrng,
-id: u32,
-local_time: u64,
-arena: std.heap.ArenaAllocator,
-argv: [][*:0]const u8,
-environ_map: std.process.Environ.Map,
 scheduler: *Scheduler,
+network: *Network,
+id: u32,
+command: []u8,
+addresses: []u32,
+entry: Scheduler.MainEntryPoint,
+stack_size: usize,
+recoverable: bool,
 faults_enabled: bool,
+local_time: u64,
 file_system: FileSystem,
-network_host: Network.Host,
-descriptors: [MAX_DESCRIPTORS]Descriptor,
 real_io: std.Io,
-stdin_reader: std.Io.File.Reader,
-stderr_writer: std.Io.File.Writer,
-stdout_writer: std.Io.File.Writer,
-stderr_buffer: [1024]u8,
-stdout_buffer: [1024]u8,
+
+// Volatile per-process state, present exactly while the node is alive. `null`
+// encodes a crashed/stopped node; (re)starting builds a fresh Runtime.
+runtime: ?Runtime,
+
+// Volatile per-process state: everything that is rebuilt on (re)start and torn
+// down on crash/deinit. Persistent node state (config, file system, clock,
+// fault toggle) lives directly on Node and survives across restarts.
+//
+// The Writer fields point at the buffers stored alongside them and the network
+// host is registered by address, so a Runtime must be initialized in place at
+// its final location (see Node.startRuntime) rather than built and moved.
+const Runtime = struct {
+    arena: std.heap.ArenaAllocator,
+    argv: [][*:0]const u8,
+    environ_map: std.process.Environ.Map,
+    network_host: Network.Host,
+    descriptors: [MAX_DESCRIPTORS]Descriptor,
+    main_task_id: ?TaskID,
+    stdin_reader: std.Io.File.Reader,
+    stdout_writer: std.Io.File.Writer,
+    stderr_writer: std.Io.File.Writer,
+    stdout_buffer: [1024]u8,
+    stderr_buffer: [1024]u8,
+
+    fn init(self: *Runtime, node: *Node) !void {
+        self.arena = .init(node.gpa);
+        self.main_task_id = null;
+
+        self.network_host.init(node.network, node.addresses, node.gpa);
+        try node.network.registerHost(&self.network_host);
+
+        for (&self.descriptors) |*desc| {
+            desc.kind = .unused;
+        }
+
+        self.argv = try splitCommandArguments(node.command, self.arena.allocator());
+        self.environ_map = try std.process.Environ.createMap(.empty, node.gpa);
+
+        self.stdin_reader = std.Io.File.stdin().readerStreaming(node.real_io, &.{});
+        self.stdout_writer = std.Io.File.stdout().writerStreaming(node.real_io, &self.stdout_buffer);
+        self.stderr_writer = std.Io.File.stderr().writerStreaming(node.real_io, &self.stderr_buffer);
+        errdefer self.deinit(node.scheduler, false);
+
+        self.main_task_id = try node.scheduler.spawn(node, node.entry, node.stack_size);
+    }
+
+    // Tears down the runtime: the task tree is cleared (subtasks removed, root
+    // either removed or kept and marked crashed) and runtime resources freed.
+    fn deinit(self: *Runtime, scheduler: *Scheduler, keep_root_but_mark_crashed: bool) void {
+        if (self.main_task_id) |main_task_id|
+            scheduler.removeTaskTree(main_task_id, keep_root_but_mark_crashed);
+
+        self.environ_map.deinit();
+        self.network_host.deinit();
+        self.arena.deinit();
+    }
+};
 
 fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error![][*:0]const u8 {
     var cursor: usize = 0;
@@ -117,38 +171,75 @@ fn splitCommandArguments(command: []const u8, arena: Allocator) Allocator.Error!
     return result;
 }
 
-pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, node_id: u32, command: []const u8, addresses: []const u32, gpa: Allocator) !void {
+const InitOptions = struct {
+    stack_size: usize,
+    recoverable: bool,
+};
+
+pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.DefaultPrng, scheduler: *Scheduler, network: *Network, node_id: u32, command: []const u8, addresses: []const u32, entry: Scheduler.MainEntryPoint, options: InitOptions, gpa: Allocator) !void {
     self.gpa = gpa;
     self.trace = trace;
     self.prng = prng;
-    self.id = node_id;
-    self.local_time = 0;
-    self.arena = .init(gpa);
     self.scheduler = scheduler;
+    self.network = network;
+    self.id = node_id;
+    self.command = try gpa.dupe(u8, command);
+    errdefer gpa.free(self.command);
+    self.addresses = try gpa.dupe(u32, addresses);
+    errdefer gpa.free(self.addresses);
+    self.entry = entry;
+    self.stack_size = options.stack_size;
+    self.recoverable = options.recoverable;
     self.faults_enabled = true;
-    try self.file_system.init(gpa);
-
-    self.network_host.init(network, addresses, gpa);
-    try network.registerHost(&self.network_host);
-
-    for (&self.descriptors) |*desc| {
-        desc.kind = .unused;
-    }
-
-    self.argv = try splitCommandArguments(command, self.arena.allocator());
-    self.environ_map = try std.process.Environ.createMap(.empty, gpa);
+    self.local_time = 0;
+    self.runtime = null;
+    try self.file_system.init(self.gpa);
+    errdefer self.file_system.deinit(gpa);
 
     self.real_io = real_io;
-    self.stdin_reader = std.Io.File.stdin().readerStreaming(real_io, &.{});
-    self.stdout_writer = std.Io.File.stdout().writerStreaming(real_io, &self.stdout_buffer);
-    self.stderr_writer = std.Io.File.stderr().writerStreaming(real_io, &self.stderr_buffer);
+    try self.startRuntime();
+}
+
+// Builds a fresh runtime in place. The Runtime is initialized through the
+// optional's storage (not built and moved) because it holds pointers into
+// itself; see the Runtime doc comment.
+fn startRuntime(self: *Node) !void {
+    std.debug.assert(self.runtime == null);
+    self.runtime = @as(Runtime, undefined);
+    errdefer self.runtime = null;
+    try self.runtime.?.init(self);
 }
 
 pub fn deinit(self: *Node) void {
-    self.environ_map.deinit();
-    self.network_host.deinit();
+    if (self.runtime) |*runtime| {
+        runtime.deinit(self.scheduler, false);
+        self.runtime = null;
+    }
     self.file_system.deinit(self.gpa);
-    self.arena.deinit();
+    self.gpa.free(self.command);
+    self.gpa.free(self.addresses);
+}
+
+pub fn isAlive(self: *const Node) bool {
+    return self.runtime != null;
+}
+
+// Crashes the node. When run_cleanup is set, the main task is first terminated
+// so its deferred cleanup runs before the runtime is torn down.
+pub fn crash(self: *Node, run_cleanup: bool) void {
+    if (self.runtime) |*runtime| {
+        if (run_cleanup) {
+            if (runtime.main_task_id) |main_task_id|
+                self.scheduler.terminate(main_task_id);
+        }
+
+        runtime.deinit(self.scheduler, true);
+        self.runtime = null;
+    }
+}
+
+pub fn restart(self: *Node) !void {
+    return self.startRuntime();
 }
 
 pub fn io(self: *Node) std.Io {
@@ -159,12 +250,12 @@ pub fn processInit(self: *Node) std.process.Init {
     return .{
         .minimal = .{
             .environ = .empty,
-            .args = .{ .vector = self.argv },
+            .args = .{ .vector = self.runtime.?.argv },
         },
-        .arena = &self.arena,
+        .arena = &self.runtime.?.arena,
         .gpa = self.gpa, // TODO: Should use a per-task allocator
         .io = self.io(),
-        .environ_map = &self.environ_map,
+        .environ_map = &self.runtime.?.environ_map,
         .preopens = .empty,
     };
 }
@@ -222,7 +313,7 @@ pub fn futexWake(self: *Node, ptr: *const u32, max_waiters: u32) void {
 }
 
 fn unusedDesc(self: *Node) ?*Descriptor {
-    for (&self.descriptors) |*desc| {
+    for (&self.runtime.?.descriptors) |*desc| {
         if (desc.kind == .unused)
             return desc;
     }
@@ -248,7 +339,7 @@ fn handleToDesc(self: *Node, handle: Handle) HandleError!*Descriptor {
 
     if (index < 0 or index >= MAX_DESCRIPTORS)
         return HandleError.InvalidHandle;
-    const desc = &self.descriptors[@intCast(index)];
+    const desc = &self.runtime.?.descriptors[@intCast(index)];
     if (desc.kind == .unused)
         return HandleError.InvalidHandle;
     return desc;
@@ -263,7 +354,7 @@ fn handleToDescOfType(self: *Node, handle: Handle, kind: Descriptor.Kind) Handle
 
 fn descToHandle(self: *Node, desc: *Descriptor) Handle {
     // TODO: This loop is extremely dumb
-    for (&self.descriptors, 0..) |*item, i| {
+    for (&self.runtime.?.descriptors, 0..) |*item, i| {
         if (item == desc)
             return @intCast(i + NUM_SPECIAL_HANDLES);
     }
@@ -569,14 +660,14 @@ pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadF
 // return a value back to the simulation or determinism would
 // be broken.
 fn writeToStdout(self: *Node, source: []const u8) void {
-    self.stdout_writer.interface.writeAll(source) catch {};
-    self.stdout_writer.interface.flush() catch {};
+    self.runtime.?.stdout_writer.interface.writeAll(source) catch {};
+    self.runtime.?.stdout_writer.interface.flush() catch {};
 }
 
 // See comment on writeToStdout
 fn writeToStderr(self: *Node, source: []const u8) void {
-    self.stderr_writer.interface.writeAll(source) catch {};
-    self.stderr_writer.interface.flush() catch {};
+    self.runtime.?.stderr_writer.interface.writeAll(source) catch {};
+    self.runtime.?.stderr_writer.interface.flush() catch {};
 }
 
 pub const WriteFileError = HandleError || Allocator.Error || CancelError;
@@ -688,7 +779,7 @@ pub fn listen(self: *Node, address: Address) ListenError!Handle {
         self.trace.failIO(pending_trace, e);
         return e;
     };
-    self.network_host.listen(address, &desc.listen) catch |e| {
+    self.runtime.?.network_host.listen(address, &desc.listen) catch |e| {
         self.trace.failIO(pending_trace, e);
         return e;
     };
@@ -717,7 +808,7 @@ pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
 
     while (true) {
         try self.fakeDelayForIo(pending_trace, Delay.socket_accept_poll);
-        self.network_host.accept(&old_desc.listen, &new_desc.conn) catch |e| switch (e) {
+        self.runtime.?.network_host.accept(&old_desc.listen, &new_desc.conn) catch |e| switch (e) {
             error.AcceptQueueEmpty => continue,
             else => {
                 self.trace.failIO(pending_trace, e);
@@ -749,7 +840,7 @@ pub fn connect(self: *Node, address: Address) ConnectError!Handle {
         self.trace.failIO(pending_trace, e);
         return e;
     };
-    self.network_host.connect(address, &desc.conn) catch |e| {
+    self.runtime.?.network_host.connect(address, &desc.conn) catch |e| {
         self.trace.failIO(pending_trace, e);
         return e;
     };
@@ -793,7 +884,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
         while (true) {
             try self.fakeDelayForIo(pending_trace, Delay.socket_read_poll);
 
-            const num = self.network_host.read(&desc.conn, target[0..want]);
+            const num = self.runtime.?.network_host.read(&desc.conn, target[0..want]);
 
             if (num > 0) {
                 self.trace.completeIO(pending_trace, num);
@@ -801,7 +892,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
             }
 
             if (num == 0) {
-                if (!self.network_host.isConnected(&desc.conn)) {
+                if (!self.runtime.?.network_host.isConnected(&desc.conn)) {
                     self.trace.completeIO(pending_trace, "eof");
                     return 0;
                 }
@@ -809,7 +900,7 @@ pub fn readSocket(self: *Node, handle: Handle, target: []u8, block: bool) ReadSo
         }
         unreachable;
     } else {
-        const num = self.network_host.read(&desc.conn, target[0..want]);
+        const num = self.runtime.?.network_host.read(&desc.conn, target[0..want]);
         self.trace.completeIO(pending_trace, num);
         return num;
     }
@@ -826,7 +917,7 @@ pub fn writeSocket(self: *Node, handle: Handle, source: []const u8) WriteSocketE
         return e;
     };
     const want = self.shortenForFault(source.len);
-    const result = self.network_host.send(&desc.conn, source[0..want]) catch |e| {
+    const result = self.runtime.?.network_host.send(&desc.conn, source[0..want]) catch |e| {
         self.trace.failIO(pending_trace, e);
         return e;
     };
@@ -845,9 +936,9 @@ pub fn closeSocket(self: *Node, handle: Handle) CloseSocketError!void {
         return e;
     };
     if (desc.kind == .conn) {
-        self.network_host.closeConnSocket(&desc.conn);
+        self.runtime.?.network_host.closeConnSocket(&desc.conn);
     } else if (desc.kind == .listen) {
-        self.network_host.closeListenSocket(&desc.listen);
+        self.runtime.?.network_host.closeListenSocket(&desc.listen);
     } else {
         const e = HandleError.InvalidHandle;
         self.trace.failIO(pending_trace, e);

@@ -66,6 +66,7 @@ pub fn event(index: u32) void {
 const SpawnOptions = struct {
     stack_size: usize = 64 * 1024,
     addresses: []const u32 = &[0]u32{}, // TODO: How do I make an empty slice?
+    recoverable: bool = true,
 };
 
 const SpawnError = error{
@@ -264,8 +265,11 @@ fn randomPartitionInterval(self: *Simulator) u64 {
 
 fn hostIDForNodeID(self: *const Simulator, id: u32) ?Network.HostID {
     for (self.nodes.items) |node| {
-        if (node.id == id)
-            return node.network_host.id;
+        if (node.id == id) {
+            if (!node.isAlive())
+                return null;
+            return node.runtime.?.network_host.id;
+        }
     }
     return null;
 }
@@ -273,7 +277,8 @@ fn hostIDForNodeID(self: *const Simulator, id: u32) ?Network.HostID {
 fn refreshPartitionEndpoints(self: *Simulator) Allocator.Error!void {
     self.partition_endpoints.clearRetainingCapacity();
     for (self.nodes.items) |node| {
-        try self.partition_endpoints.append(self.gpa, node.network_host.id);
+        if (node.isAlive())
+            try self.partition_endpoints.append(self.gpa, node.runtime.?.network_host.id);
     }
 }
 
@@ -298,13 +303,14 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     const node = try self.gpa.create(Node);
     errdefer self.gpa.destroy(node);
 
-    try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, node_id, command, options.addresses, self.gpa);
+    try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, node_id, command, options.addresses, entry, .{
+        .stack_size = options.stack_size,
+        .recoverable = options.recoverable,
+    }, self.gpa);
+    errdefer node.deinit();
     node.enableFaults(self.faults_enabled);
 
     try self.nodes.append(self.gpa, node);
-    errdefer _ = self.nodes.swapRemove(self.nodes.items.len - 1);
-
-    _ = try self.scheduler.spawn(node, entry, options.stack_size);
 }
 
 pub fn scheduleOne(self: *Simulator) bool {
