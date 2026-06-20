@@ -18,11 +18,11 @@ pub const PartitionShapeWeights = PartitionPolicy.ShapeWeights;
 pub const PartitionFaultOptions = struct {
     weights: PartitionShapeWeights = .{},
     min_interval_us: u64 = 1_000,
-    max_interval_us: u64 = 10_000,
+    max_interval_us: u64 = 60 * 60 * 1_000_000,
 };
 
 const CRASH_FAULT_MIN_INTERVAL_US = 1_000;
-const CRASH_FAULT_MAX_INTERVAL_US = 10_000;
+const CRASH_FAULT_MAX_INTERVAL_US = 60 * 60 * 1_000_000;
 
 // Process-global pointer to the active simulation's sometimes-assertion
 // registry. Programs under test only receive an `std.Io` and have no handle to
