@@ -727,6 +727,11 @@ pub fn accept(self: *Node, handle: Handle) AcceptError!Handle {
     }
 }
 
+pub fn remoteAddress(self: *Node, handle: Handle) HandleError!Address {
+    const desc = try self.handleToDescOfType(handle, .conn);
+    return desc.conn.remote_address;
+}
+
 pub const ConnectError = error{
     DescriptorLimit,
 } || Network.ConnectError || CancelError;
