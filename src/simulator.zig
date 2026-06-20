@@ -21,6 +21,9 @@ pub const PartitionFaultOptions = struct {
     max_interval_us: u64 = 10_000,
 };
 
+const CRASH_FAULT_MIN_INTERVAL_US = 1_000;
+const CRASH_FAULT_MAX_INTERVAL_US = 10_000;
+
 // Process-global pointer to the active simulation's sometimes-assertion
 // registry. Programs under test only receive an `std.Io` and have no handle to
 // the Simulator, so assertSometimes() reaches the registry through this global.
@@ -90,6 +93,7 @@ faults_enabled: bool,
 partition_target_selected: bool,
 partition_fault_options: PartitionFaultOptions,
 next_partition_step_time_us: u64,
+next_crash_step_time_us: u64,
 nodes: std.ArrayList(*Node),
 executables: std.ArrayList(ExecutableName),
 real_io: std.Io,
@@ -109,6 +113,7 @@ pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.partition_target_selected = false;
     self.partition_fault_options = .{};
     self.next_partition_step_time_us = 0;
+    self.next_crash_step_time_us = 0;
     self.nodes = .empty;
     self.executables = .empty;
     self.real_io = real_io;
@@ -200,8 +205,9 @@ pub fn disablePartitionFaults(self: *Simulator) void {
 
 pub fn enableFaults(self: *Simulator, yes: bool) void {
     self.faults_enabled = yes;
-    for (self.nodes.items) |node|
+    for (self.nodes.items) |node| {
         node.enableFaults(yes);
+    }
     if (!yes)
         self.network.partitions.clear();
 }
@@ -255,8 +261,39 @@ fn automaticPartitionStep(self: *Simulator) Allocator.Error!void {
 }
 
 fn randomPartitionInterval(self: *Simulator) u64 {
-    const min = self.partition_fault_options.min_interval_us;
-    const max = self.partition_fault_options.max_interval_us;
+    return self.randomIntervalUs(
+        self.partition_fault_options.min_interval_us,
+        self.partition_fault_options.max_interval_us,
+    );
+}
+
+// Picks a live node at random and either crashes it (with cleanup decided by a
+// coin flip) or, if it is already down and recoverable, restarts it. Like
+// automaticPartitionStep, this is part of the unified fault system gated by
+// faults_enabled and runs at randomized intervals.
+fn automaticCrashStep(self: *Simulator) void {
+    if (!self.faults_enabled)
+        return;
+    if (self.nodes.items.len == 0)
+        return;
+
+    const now = self.scheduler.current_time;
+    if (now < self.next_crash_step_time_us)
+        return;
+
+    const random = self.prng.random();
+    const node = self.nodes.items[random.uintLessThan(usize, self.nodes.items.len)];
+    if (node.isAlive()) {
+        node.crash(random.boolean());
+    } else if (node.recoverable) {
+        node.restart() catch {};
+    }
+
+    const interval = self.randomIntervalUs(CRASH_FAULT_MIN_INTERVAL_US, CRASH_FAULT_MAX_INTERVAL_US);
+    self.next_crash_step_time_us = std.math.add(u64, now, interval) catch std.math.maxInt(u64);
+}
+
+fn randomIntervalUs(self: *Simulator, min: u64, max: u64) u64 {
     if (min == max)
         return min;
 
@@ -316,7 +353,29 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
 pub fn scheduleOne(self: *Simulator) bool {
     self.events = 0;
     self.automaticPartitionStep() catch {};
-    return self.scheduler.scheduleOne();
+    self.automaticCrashStep();
+    if (self.scheduler.scheduleOne())
+        return true;
+
+    // No task is runnable (e.g. every node is crashed, so nothing is left to
+    // advance the clock). While the crash injector could still bring a dead
+    // node back, jump time forward to its next step so it fires and restarts
+    // one, keeping the simulation alive.
+    while (self.faults_enabled and self.hasRestartableNode()) {
+        self.scheduler.advanceTimeTo(self.next_crash_step_time_us);
+        self.automaticCrashStep();
+        if (self.scheduler.scheduleOne())
+            return true;
+    }
+    return false;
+}
+
+fn hasRestartableNode(self: *const Simulator) bool {
+    for (self.nodes.items) |node| {
+        if (!node.isAlive() and node.recoverable)
+            return true;
+    }
+    return false;
 }
 
 pub fn eventRaised(self: *const Simulator, index: u32) bool {
