@@ -1215,7 +1215,7 @@ fn now(userdata: ?*anyopaque, clock: Clock) Timestamp {
     // TODO: Return an appropriate time for each clock
     _ = clock;
 
-    return .{ .nanoseconds = node.local_time * 1000 };
+    return .{ .nanoseconds = node.scheduler.current_time * 1000 };
 }
 
 fn clockResolution(userdata: ?*anyopaque, clock: Clock) Clock.ResolutionError!Duration {

@@ -75,7 +75,6 @@ entry: Scheduler.MainEntryPoint,
 stack_size: usize,
 recoverable: bool,
 faults_enabled: bool,
-local_time: u64,
 file_system: FileSystem,
 real_io: std.Io,
 
@@ -191,7 +190,6 @@ pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.Defau
     self.stack_size = options.stack_size;
     self.recoverable = options.recoverable;
     self.faults_enabled = true;
-    self.local_time = 0;
     self.runtime = null;
     try self.file_system.init(self.gpa);
     errdefer self.file_system.deinit(gpa);

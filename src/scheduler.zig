@@ -27,7 +27,6 @@ const ContextSwitch = extern struct {
 
 const STACK_CANARY_SIZE = 256;
 const STACK_CANARY_BYTE = 0xa5;
-const TASK_RUN_COST_US = 50;
 
 pub const TaskID = u64;
 
@@ -305,9 +304,6 @@ fn advanceTimeAndUnblockTasks(self: *Scheduler, new_time: u64) void {
     std.debug.assert(self.current_time < new_time);
     const old_time = self.current_time;
     self.current_time = new_time;
-    for (self.tasks.items) |task| {
-        task.node.local_time = @max(task.node.local_time, new_time);
-    }
     self.trace.timeAdvanced(old_time, new_time);
     for (self.tasks.items) |*task| {
         if (task.state == .blocked) {
@@ -427,7 +423,6 @@ fn taskStart(self: *Scheduler) callconv(.c) noreturn {
     current.wakeup_time = null;
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
-    current.node.local_time += TASK_RUN_COST_US;
     self.traceTaskState(current, if (failed) .failed else .returned, "task completed");
     if (current.parent_id) |parent_id| {
         if (self.findTaskByID(parent_id)) |parent| {
@@ -459,7 +454,6 @@ pub fn sleep(self: *Scheduler, delta_us: u64) !void {
     current.wakeup_time = self.current_time + delta_us;
     current.wakeup_tasks = null;
     current.wakeup_futex = null;
-    current.node.local_time += TASK_RUN_COST_US;
     self.traceTaskState(current, .sleeping, "sleep");
     contextSwitch(&current.regs, &self.regs);
     const resumed = self.findTaskByID(id).?;
@@ -483,7 +477,6 @@ pub fn futexWaitUncancelable(self: *Scheduler, ptr: *const u32, expected: u32) v
     current.wakeup_time = null;
     current.wakeup_tasks = null;
     current.wakeup_futex = ptr;
-    current.node.local_time += TASK_RUN_COST_US;
     self.traceTaskState(current, .waiting_futex, "futex wait");
     contextSwitch(&current.regs, &self.regs);
     const resumed = self.findTaskByID(id).?;
@@ -532,7 +525,6 @@ pub fn wait(self: *Scheduler, ids: []const TaskID) !TaskID {
         task.wakeup_time = null;
         task.wakeup_tasks = ids;
         task.wakeup_futex = null;
-        task.node.local_time += TASK_RUN_COST_US;
         self.traceTaskState(task, .waiting_task, "wait");
         contextSwitch(&task.regs, &self.regs);
         const resumed = self.findTaskByID(id).?;

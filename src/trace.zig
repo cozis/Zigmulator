@@ -31,7 +31,7 @@ pub const Trace = struct {
 
     const Pending = struct {
         trace_id: u64,
-        local_time: u64,
+        start_time: u64,
         global_time: u64,
         node_id: u32,
         task_id: TaskID,
@@ -82,12 +82,11 @@ pub const Trace = struct {
         if (self.file == null) return;
 
         const global_time = self.scheduler.current_time;
-        const local_time = node.local_time;
 
         var line_buffer: [256]u8 = undefined;
         const prefix = std.fmt.bufPrint(&line_buffer,
             \\{{"time":{},"global_time":{},"event":"task_spawned","node":{},"task":{}
-        , .{ local_time, global_time, node.id, task_id }) catch return;
+        , .{ global_time, global_time, node.id, task_id }) catch return;
         self.write(prefix);
         if (parent_id) |it| {
             const parent = std.fmt.bufPrint(&line_buffer, ",\"parent\":{}", .{it}) catch return;
@@ -100,13 +99,12 @@ pub const Trace = struct {
         if (self.file == null) return;
 
         const global_time = self.scheduler.current_time;
-        const local_time = node.local_time;
 
         var line_buffer: [256]u8 = undefined;
         const line = std.fmt.bufPrint(&line_buffer,
             \\{{"time":{},"global_time":{},"event":"task_removed","node":{},"task":{}}}
             \\
-        , .{ local_time, global_time, node.id, task_id }) catch return;
+        , .{ global_time, global_time, node.id, task_id }) catch return;
         self.write(line);
     }
 
@@ -114,12 +112,11 @@ pub const Trace = struct {
         if (self.file == null) return;
 
         const global_time = self.scheduler.current_time;
-        const local_time = node.local_time;
 
         var line_buffer: [256]u8 = undefined;
         const prefix = std.fmt.bufPrint(&line_buffer,
             \\{{"time":{},"global_time":{},"event":"state","node":{},"task":{},"state":
-        , .{ local_time, global_time, node.id, task_id }) catch return;
+        , .{ global_time, global_time, node.id, task_id }) catch return;
         self.write(prefix);
         self.writeJsonString(state.toString());
         self.write(",\"reason\":");
@@ -142,7 +139,7 @@ pub const Trace = struct {
         if (self.file == null)
             return .{
                 .trace_id = 0,
-                .local_time = 0,
+                .start_time = 0,
                 .global_time = 0,
                 .task_id = 0,
                 .node_id = 0,
@@ -156,7 +153,6 @@ pub const Trace = struct {
         const task = self.task.?;
 
         const global_time = self.scheduler.current_time;
-        const local_time = node.local_time;
 
         const trace_id = self.next_trace_id;
         self.next_trace_id += 1;
@@ -164,7 +160,7 @@ pub const Trace = struct {
         var line_buffer: [256]u8 = undefined;
         const prefix = std.fmt.bufPrint(&line_buffer,
             \\{{"time":{},"global_time":{},"event":"io_start","id":{},"node":{},"task":{},"op":
-        , .{ local_time, global_time, trace_id, node.id, task }) catch @panic("TODO");
+        , .{ global_time, global_time, trace_id, node.id, task }) catch @panic("TODO");
         self.write(prefix);
         self.writeJsonString(source.fn_name);
         self.write(",\"resource\":");
@@ -173,7 +169,7 @@ pub const Trace = struct {
 
         return .{
             .trace_id = trace_id,
-            .local_time = local_time,
+            .start_time = global_time,
             .global_time = global_time,
             .node_id = node.id,
             .task_id = task,
@@ -194,20 +190,18 @@ pub const Trace = struct {
         if (self.file == null) return;
 
         const global_time = self.scheduler.current_time;
-        const node = self.node orelse return;
-        const local_time = node.local_time;
 
         var line_buffer: [256]u8 = undefined;
         const prefix = std.fmt.bufPrint(&line_buffer,
             \\{{"time":{},"global_time":{},"event":"io_complete","id":{},"node":{},"task":{},"op":
-        , .{ local_time, global_time, pending_trace.trace_id, pending_trace.node_id, pending_trace.task_id }) catch return;
+        , .{ global_time, global_time, pending_trace.trace_id, pending_trace.node_id, pending_trace.task_id }) catch return;
         self.write(prefix);
         self.writeJsonString(pending_trace.op);
         self.write(",\"resource\":");
         self.writeJsonString(if (pending_trace.disk) "disk" else "io");
         const suffix = std.fmt.bufPrint(&line_buffer,
             \\,"start":{},"end":{},"result":
-        , .{ pending_trace.local_time, local_time }) catch return;
+        , .{ pending_trace.start_time, global_time }) catch return;
         self.write(suffix);
         var result_buffer: [96]u8 = undefined;
         self.writeJsonString(resultText(&result_buffer, result));
@@ -217,12 +211,12 @@ pub const Trace = struct {
             var disk_line_buffer: [256]u8 = undefined;
             const disk_prefix = std.fmt.bufPrint(&disk_line_buffer,
                 \\{{"time":{},"global_time":{},"event":"disk","node":{},"op":
-            , .{ pending_trace.local_time, global_time, pending_trace.node_id }) catch return;
+            , .{ pending_trace.start_time, global_time, pending_trace.node_id }) catch return;
             self.write(disk_prefix);
             self.writeJsonString(pending_trace.op);
             const middle = std.fmt.bufPrint(&disk_line_buffer,
                 \\,"start":{},"end":{},"detail":
-            , .{ pending_trace.local_time, local_time }) catch return;
+            , .{ pending_trace.start_time, global_time }) catch return;
             self.write(middle);
             self.writeJsonString(resultText(&result_buffer, result));
             self.write("}\n");
