@@ -72,6 +72,7 @@ arena: std.heap.ArenaAllocator,
 argv: [][*:0]const u8,
 environ_map: std.process.Environ.Map,
 scheduler: *Scheduler,
+faults_enabled: bool,
 file_system: FileSystem,
 network_host: Network.Host,
 descriptors: [MAX_DESCRIPTORS]Descriptor,
@@ -124,6 +125,7 @@ pub fn init(self: *Node, real_io: std.Io, trace: *Trace, prng: *std.Random.Defau
     self.local_time = 0;
     self.arena = .init(gpa);
     self.scheduler = scheduler;
+    self.faults_enabled = true;
     try self.file_system.init(gpa);
 
     self.network_host.init(network, addresses, gpa);
@@ -174,7 +176,9 @@ pub fn sleep(self: *Node, delta_us: u64) !void {
 fn fakeDelay(self: *Node, range: DelayRange) !void {
     std.debug.assert(range.min_us <= range.max_us);
 
-    const delay_us = if (range.min_us == range.max_us) range.min_us else blk: {
+    const delay_us = if (!self.faults_enabled or range.min_us == range.max_us)
+        range.min_us
+    else blk: {
         const random = self.prng.random();
         break :blk range.min_us + random.uintLessThan(u64, range.max_us - range.min_us + 1);
     };
@@ -758,7 +762,13 @@ pub fn connect(self: *Node, address: Address) ConnectError!Handle {
 pub const ReadSocketError = HandleError || CancelError;
 
 // TODO: make this configurable
+pub fn enableFaults(self: *Node, yes: bool) void {
+    self.faults_enabled = yes;
+}
+
 fn shortenForFault(self: *Node, len: usize) usize {
+    if (!self.faults_enabled)
+        return len;
     if (len <= 1)
         return len;
     return 1 + self.prng.random().uintLessThan(usize, len);
