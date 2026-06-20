@@ -1,11 +1,23 @@
 const std = @import("std");
 
+pub const ModuleOptions = struct {
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+};
+
+pub fn addZigmulatorModule(b: *std.Build, options: ModuleOptions) *std.Build.Module {
+    return b.addModule("zigmulator", .{
+        .root_source_file = b.path("src/simulator.zig"),
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zigmulator = b.addModule("zigmulator", .{
-        .root_source_file = b.path("src/simulator.zig"),
+    const zigmulator = addZigmulatorModule(b, .{
         .target = target,
         .optimize = optimize,
     });
