@@ -78,7 +78,7 @@ scheduler: Scheduler,
 network: Network,
 partition_policy: PartitionPolicy,
 partition_endpoints: std.ArrayList(Network.HostID),
-partition_policy_enabled: bool,
+faults_enabled: bool,
 partition_target_selected: bool,
 partition_fault_options: PartitionFaultOptions,
 next_partition_step_time_us: u64,
@@ -96,7 +96,7 @@ pub fn init(self: *Simulator, gpa: Allocator, real_io: std.Io, seed: u64) void {
     self.network.init(gpa);
     self.partition_policy.init(gpa, .{});
     self.partition_endpoints = .empty;
-    self.partition_policy_enabled = false;
+    self.faults_enabled = true;
     self.partition_target_selected = false;
     self.partition_fault_options = .{};
     self.next_partition_step_time_us = 0;
@@ -178,13 +178,24 @@ pub fn enablePartitionFaults(self: *Simulator, options: PartitionFaultOptions) v
 
     self.partition_fault_options = options;
     self.partition_policy.weights = options.weights;
-    self.partition_policy_enabled = true;
     self.partition_target_selected = false;
     self.next_partition_step_time_us = self.scheduler.current_time;
 }
 
 pub fn disablePartitionFaults(self: *Simulator) void {
-    self.partition_policy_enabled = false;
+    self.enableFaults(false);
+}
+
+pub fn enableFaults(self: *Simulator, yes: bool) void {
+    self.faults_enabled = yes;
+    for (self.nodes.items) |node|
+        node.enableFaults(yes);
+    if (!yes)
+        self.network.partitions.clear();
+}
+
+pub fn nowUs(self: *const Simulator) u64 {
+    return self.scheduler.current_time;
 }
 
 pub fn pickPartitionTarget(self: *Simulator) Allocator.Error!PartitionShape {
@@ -211,7 +222,7 @@ pub fn partitionAtTarget(self: *Simulator) Allocator.Error!bool {
 }
 
 fn automaticPartitionStep(self: *Simulator) Allocator.Error!void {
-    if (!self.partition_policy_enabled)
+    if (!self.faults_enabled)
         return;
 
     const now = self.scheduler.current_time;
@@ -277,6 +288,7 @@ pub fn spawn(self: *Simulator, command: []const u8, options: SpawnOptions) Spawn
     errdefer self.gpa.destroy(node);
 
     try node.init(self.real_io, &self.trace, &self.prng, &self.scheduler, &self.network, node_id, command, options.addresses, self.gpa);
+    node.enableFaults(self.faults_enabled);
 
     try self.nodes.append(self.gpa, node);
     errdefer _ = self.nodes.swapRemove(self.nodes.items.len - 1);
