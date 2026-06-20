@@ -516,6 +516,23 @@ pub fn syncFile(self: *Node, handle: Handle) SyncFileError!void {
     self.trace.completeIO(pending_trace, .{});
 }
 
+pub const SetFileLengthError = HandleError || Allocator.Error || CancelError;
+
+pub fn setFileLength(self: *Node, handle: Handle, length: usize) SetFileLengthError!void {
+    const pending_trace = self.trace.beginIO(true, @src());
+
+    try self.fakeDelayForIo(pending_trace, Delay.file_write);
+    const desc = self.handleToDescOfType(handle, .file) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.file_system.setFileLength(&desc.file, self.gpa, length) catch |e| {
+        self.trace.failIO(pending_trace, e);
+        return e;
+    };
+    self.trace.completeIO(pending_trace, .{});
+}
+
 pub const ReadFileError = HandleError || CancelError;
 
 pub fn readFile(self: *Node, handle: Handle, offset: ?usize, target: []u8) ReadFileError!usize {
