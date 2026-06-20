@@ -5,6 +5,7 @@ const net = Io.net;
 const Simulator = @import("zigmulator");
 
 const server_ip = net.Ip4Address.loopback(8080);
+const client_ip = net.Ip4Address{ .bytes = .{ 127, 0, 0, 2 }, .port = 0 };
 const server_address: net.IpAddress = .{ .ip4 = server_ip };
 
 fn serverProgram(init: std.process.Init) anyerror!void {
@@ -61,6 +62,7 @@ fn clientProgram(init: std.process.Init) anyerror!void {
 
 pub fn main(init: std.process.Init) !void {
     const server_addresses = [_]u32{std.mem.readInt(u32, &server_ip.bytes, .big)};
+    const client_addresses = [_]u32{std.mem.readInt(u32, &client_ip.bytes, .big)};
 
     var sim: Simulator = undefined;
     sim.init(std.heap.page_allocator, init.io, 0);
@@ -72,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
     try sim.addExecutable("client", clientProgram);
 
     try sim.spawn("server", .{ .addresses = &server_addresses });
-    try sim.spawn("client", .{});
+    try sim.spawn("client", .{ .addresses = &client_addresses });
 
     while (sim.scheduleOne()) {}
 }

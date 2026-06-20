@@ -7,6 +7,7 @@ const assertSometimes = Simulator.assertSometimes;
 const reachableSometimes = Simulator.reachableSometimes;
 
 const server_ip = net.Ip4Address.loopback(9090);
+const client_ip = net.Ip4Address{ .bytes = .{ 127, 0, 0, 2 }, .port = 0 };
 const server_address: net.IpAddress = .{ .ip4 = server_ip };
 const payload = "payload:v1:write-sync-rename-send";
 const ack = "ack";
@@ -169,6 +170,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn runSimulation(init: std.process.Init, seed: u64) !void {
     const server_addresses = [_]u32{std.mem.readInt(u32, &server_ip.bytes, .big)};
+    const client_addresses = [_]u32{std.mem.readInt(u32, &client_ip.bytes, .big)};
 
     var sim: Simulator = undefined;
     sim.init(std.heap.page_allocator, init.io, seed);
@@ -190,7 +192,7 @@ fn runSimulation(init: std.process.Init, seed: u64) !void {
     try sim.addExecutable("client", clientProgram);
 
     try sim.spawn("server", .{ .addresses = &server_addresses });
-    try sim.spawn("client", .{});
+    try sim.spawn("client", .{ .addresses = &client_addresses });
 
     while (sim.scheduleOne()) {}
 }
